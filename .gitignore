@@ -1,0 +1,106 @@
+# TRIO 脚手架自身的运行时产物
+# 保留需要纳入版本控制的配置与门禁逻辑，其余 omp 运行时状态一律忽略。
+.omp/*
+!.omp/trio/
+!.omp/hooks/
+
+# ── omp 运行时产物 ─────────────────────────────────────────────────────────
+.omp/agent/
+.omp/sessions/
+.omp/cache/
+.omp/logs/
+.omp/run/
+.omp/state/
+.omp/blobs/
+.omp/reports/
+.omp/*.db
+.omp/*.db-shm
+.omp/*.db-wal
+.omp/config.yml
+.omp/settings.json
+.omp/mcp.json
+.omp/.mcp.json
+.omp/env
+
+# ── 系统与编辑器临时文件 ───────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+Desktop.ini
+ehthumbs.db
+*.swp
+*.swo
+*~
+.\#*
+\#*\#
+
+# ── 日志与临时文件 ─────────────────────────────────────────────────────────
+*.log
+logs/
+tmp/
+temp/
+.cache/
+*.tmp
+*.temp
+*.bak
+*.orig
+*.rej
+
+# ── Python 常见产物 ───────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ── 虚拟环境 ───────────────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+.env
+.env.*
+!.env.example
+
+# ── 测试与类型检查缓存 ─────────────────────────────────────────────────────
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pytype/
+.tox/
+.nox/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.hypothesis/
+
+# ── 编辑器 / IDE ───────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.code-workspace
+.zed/
+
+# ── 工具输出 ───────────────────────────────────────────────────────────────
+*.log.txt
+nohup.out

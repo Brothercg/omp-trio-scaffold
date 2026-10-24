@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+#
+# TRIO 提交门禁 —— git pre-commit 兜底
+#
+# 与 .omp/hooks/pre/trio-guard.ts 共用 .omp/trio/policy.txt 这一份策略真值源。
+# 两层职责分工：
+#   - hook      ：实时拦截，阻止越权写入落盘
+#   - pre-commit：提交前复核暂存区，防止绕过 hook 的路径（如手工 git add）
+#
+# 角色身份来自环境变量 TRIO_ROLE（pm / dev / qa）。
+# 未设置 TRIO_ROLE 时放行 —— 人工提交是合法逃生舱，本 hook 只做角色维度的校验。
+#
+# 用法：作为 .git/hooks/pre-commit 安装（由 bin/init-agent.sh 完成）。
+#      也可手动运行：bash .git/hooks/pre-commit
+
+set -uo pipefail
+
+readonly POLICY_REL=".omp/trio/policy.txt"
+readonly SELF="$(basename "$0")"
+
+log_error() { printf '%s: %s\n' "$SELF" "$*" >&2; }
+log_info() { printf '%s: %s\n' "$SELF" "$*"; }
+
+# ── 角色校验 ───────────────────────────────────────────────────────────────
+
+ROLE="${TRIO_ROLE:-}"
+if [[ -z "$ROLE" ]]; then
+	log_info "TRIO_ROLE 未设置 → 跳过角色校验（人工提交放行）"
+	exit 0
+fi
+case "$ROLE" in
+	pm | dev | qa) ;;
+	*)
+		log_error "TRIO_ROLE 取值非法：'${ROLE}'（应为 pm | dev | qa）"
+		exit 1
+		;;
+esac
+
+# ── 定位项目根与策略文件 ───────────────────────────────────────────────────
+
+GIT_DIR="$(git rev-parse --git-dir 2>/dev/null)" || {
+	log_error "不在 git 仓库中，跳过"
+	exit 0
+}
+GIT_DIR="$(cd "$GIT_DIR" && pwd)"
+PROJECT_ROOT="$(cd "$GIT_DIR/.." && pwd)"
+POLICY_FILE="${PROJECT_ROOT}/${POLICY_REL}"
+
+if [[ ! -f "$POLICY_FILE" ]]; then
+	log_error "策略文件缺失：${POLICY_REL}"
+	log_error "拒绝提交。恢复策略文件或手动提交（git commit --no-verify）。"
+	exit 1
+fi
+
+# ── 暂存文件列表 ───────────────────────────────────────────────────────────
+
+STAGED="$(git diff --cached --name-only --diff-filter=ACMRDT 2>/dev/null)"
+if [[ -z "$STAGED" ]]; then
+	exit 0
+fi
+
+# ── 策略解析 ───────────────────────────────────────────────────────────────
+# 与 hook 保持同一套语义：
+#   allow <role> <glob> / deny <role> <glob>
+#   判定顺序：任一 deny 命中 → 拒绝；否则任一 allow 命中 → 允许；否则拒绝。
+
+mapfile -t ALLOW_RULES < <(awk -v r="$ROLE" '$1=="allow" && ($2==r || $2=="*") {print $3}' "$POLICY_FILE")
+mapfile -t DENY_RULES < <(awk -v r="$ROLE" '$1=="deny" && ($2==r || $2=="*") {print $3}' "$POLICY_FILE")
+
+# glob → 正则：'*' 匹配任意字符（含 '/'），'**' 等价于 '*'。
+# 路径 glob 的 '*' 跨目录分隔符，与 hook 侧 matchGlob 的语义一致。
+glob_to_regex() {
+	local glob="$1"
+	printf '%s' "$glob" | sed -e 's/[.+^${}()|[\]\\]/\\&/g' -e 's/\*\*/.*/g' -e 's/\*/.*/g'
+}
+
+match_glob() {
+	local glob="$1" path="$2"
+	if [[ "$glob" == *"/**" ]]; then
+		local prefix="${glob%/**}"
+		[[ "$path" == "$prefix" || "$path" == "$prefix"/* ]]
+		return
+	fi
+	local regex
+	regex="$(glob_to_regex "$glob")"
+	[[ "$path" =~ $regex ]]
+}
+
+# ── 逐文件判定 ─────────────────────────────────────────────────────────────
+
+violations=()
+
+while IFS= read -r file; do
+	[[ -z "$file" ]] && continue
+
+	denied=""
+	for glob in ${DENY_RULES[@]+"${DENY_RULES[@]}"}; do
+		if match_glob "$glob" "$file"; then
+			denied="$glob"
+			break
+		fi
+	done
+	if [[ -n "$denied" ]]; then
+		violations+=("${file}  （命中禁止规则：${denied}）")
+		continue
+	fi
+
+	allowed=""
+	for glob in ${ALLOW_RULES[@]+"${ALLOW_RULES[@]}"}; do
+		if match_glob "$glob" "$file"; then
+			allowed="$glob"
+			break
+		fi
+	done
+	if [[ -z "$allowed" ]]; then
+		violations+=("${file}  （不在 ${ROLE} 的写入白名单内）")
+	fi
+done <<<"$STAGED"
+
+# ── 裁决 ───────────────────────────────────────────────────────────────────
+
+if [[ ${#violations[@]} -gt 0 ]]; then
+	log_error "TRIO 门禁：${ROLE} 的越权提交被拒绝（${#violations[@]} 个文件）"
+	printf '  - %s\n' "${violations[@]}" >&2
+	log_error "策略来源：${POLICY_REL}"
+	log_error "若为误判，请修改 ${POLICY_REL} 后重试，或人工提交（git commit --no-verify）。"
+	exit 1
+fi
+
+exit 0
