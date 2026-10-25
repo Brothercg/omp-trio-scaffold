@@ -3,8 +3,7 @@
 <!--
 落位：docs/task/2026-10-26-发布门禁复盘/board.md
 本任务由 DEV 发起：复盘 TASK-001（v0.2.0）发布过程中暴露的门禁契约缺口。
-当前状态为 spec_agreed（v2）：BUG-002 已裁决（V-2），待用户落盘临时写通道
-diff 后 DEV 重启会话并推进 implementing。
+当前状态为 blocked：当前 omp 进程仍缓存旧 policy，需用户重启会话后继续。
 -->
 
 ## 1. 标识
@@ -21,9 +20,9 @@ diff 后 DEV 重启会话并推进 implementing。
 
 | 字段 | 值 |
 |---|---|
-| 当前状态 | `spec_agreed`（实施前置已满足：policy 写通道已落盘 `3fb519a`；DEV 重启会话后即可推 `implementing`） |
-| 最后推进人 | `ARCH`（用户授权代落 policy 窗口 + 验证） |
-| 最后更新 | `2026-10-26 05:52` |
+| 当前状态 | `blocked`（旧会话 policy 缓存未刷新） |
+| 最后推进人 | `DEV`（写 guard 被旧规则拒绝，未改实现文件） |
+| 最后更新 | `2026-10-26 06:04` |
 
 > 状态推进权见 `templates/board.template.md`。DEV 只负责提出缺口与证据，
 > 是否立项、如何定 AC、优先级排序由 ARCH 裁决；DEV 不修改契约与测试。
@@ -34,9 +33,7 @@ diff 后 DEV 重启会话并推进 implementing。
 
 | AC | 契约定稿 | 实现 | 验证 | 状态 |
 |---|---|---|---|---|
-| AC | 契约定稿 | 实现 | 验证 | 状态 |
-|---|---|---|---|---|
-| AC-1/2/3 guard 误伤消除（G-1a） | `☑`(v2) | `☐` | `☐` | 待 DEV（通道生效后） |
+| AC-1/2/3 guard 误伤消除（G-1a） | `☑`(v2) | `☐` | `☐` | 待 DEV（重启后） |
 | AC-4 证据绑定（G-6，取代 TASK-001 AC-7） | `☑`(v2) | `☐` | `☐` | 待 DEV |
 | AC-5/6 自举豁免放行（G-2） | `☑`(v2) | `☐` | `☐` | 待 DEV |
 | AC-7 rules 相等断言（G-3） | `☑`(v2) | `☐` | `☐` | 待 QA 补断言（当前两侧已相等） |
@@ -60,6 +57,7 @@ diff 后 DEV 重启会话并推进 implementing。
 | B-5 | `contract-gap` | 无 `CHANGELOG.md` / `VERSION` / `package.json`；版本号只在 README 散文与 tag 中，发布靠手工 | `DEV` | `ARCH` | `04:50` |
 | B-6 | `contract-gap` | pre-push 的报告 glob 是全仓库、看板取 mtime 最新；放行证据未绑定待推任务 / 提交，旧报告可放行新推送 | `DEV` | `ARCH` | `04:50` |
 | B-7 | `已解决` | spec §8 分给 DEV 的 5 个文件被 policy 拒绝。V-2 裁决经任务级临时写通道放行（ADR-0003）；policy 窗口已由用户授权、ARCH 代落（commit `3fb519a`）。DEV 重启会话后开工 | `DEV` | `ARCH`（已处置） | `05:19` |
+| B-8 | `blocked` | 当前 omp 进程仍缓存旧 policy：DEV edit `.omp/hooks/pre/trio-guard.ts` 被 `命中禁止规则 (* .omp/hooks/**)` 拒绝，而新 policy 已将该行改为 `deny arch`/`deny qa` + 窗口 allow。需用户完全退出并重启 dev 会话 | `DEV` | 用户 | `06:04` |
 
 > 连续 3 轮未全绿 → 停手并在此记 `blocked` 四项。本任务尚无实现轮次。
 
@@ -74,11 +72,8 @@ diff 后 DEV 重启会话并推进 implementing。
 
 ## 6. 交接备注
 
-BUG-002 已裁决（V-2），契约升 v2（实施前置与分工重写，新增 AC-11/12）。
-写通道已落盘（`3fb519a`），前置满足。**下一步**：①DEV **重启会话**
-（guard 进程内缓存 policy，旧会话读不到新规则）→ ②看板推 `implementing`，
-DEV 按 v2 §8 实现 AC-1~AC-8/10，通道外文件一律不碰、commit 显式 pathspec
-→ ③QA 更新 2 条钉旧语义的断言（guard/policy 套件）并出 AC-1~AC-12 对抗
-用例（重点：AC-4 祖先边界、AC-6 豁免伪造、AC-11 通道越界、AC-12 回收残留）
-→ ④user_signed 后用户回收通道（删 BEGIN/END 段 + 恢复两行 deny *），
-QA 按 AC-12 核验。
+`implementing` 首步再次停：当前 omp 进程仍使用旧 policy 缓存（写入
+`.omp/hooks/pre/trio-guard.ts` 被 `deny * .omp/hooks/**` 拒绝，新 policy
+已无该行）。DEV 未修改任何实现文件、未绕过 guard。请用户**完全退出并重启
+dev 会话**（`bin/start-agent.sh dev` / `trio-start dev`），重启后 DEV 将
+看板推回 `implementing` 并按 spec v2 §8 继续。
