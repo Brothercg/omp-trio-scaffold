@@ -1,19 +1,26 @@
 # 缺陷：<一句话描述现象>
 
 <!--
-用法：复制本文件到 docs/bugs/<defect-id>.md 后填写。
-本文件由 QA 独占写入。核心要求：必须附最小报错复现脚本路径，
-只报告不修复 —— 不要改 src/。
+填写人：谁撞到谁写（QA 为主，DEV 与 ARCH 也可提交自己的缺口文件）。
+落位：docs/task/<YYYY-MM-DD-事项>/<你的角色>-<YYYYMMDD>-<HHMM>-bug-<编号>.md
+
+核心要求：
+  - 必须附最小报错复现脚本路径（`type: code` 时）；缺失则缺陷不成立。
+  - 只报告不修复 —— 任何角色都不改别人的代码。
+  - 契约缺口（`type: contract-gap`）另由 ARCH 出 `arch-*-verdict-*.md`，
+    本文件只留现象与指向，**不要**在这里写裁决。
 -->
 
 | 字段 | 值 |
 |---|---|
-| Defect ID | `<BUG-000>` |
+| Defect ID | `BUG-000` |
+| 类型 | `code`（实现错） / `contract-gap`（契约/规则本身的缺口） |
 | 发现时间 | `<YYYY-MM-DD HH:MM>` |
 | 严重级别 | `Blocker` / `Critical` / `Major` / `Minor` |
 | 对应 Task ID | `<TASK-000>` |
 | 违反的验收准则 | `AC-<n>` / `契约未覆盖` |
 | 状态 | `open` / `confirmed` / `fixed` / `rejected` |
+| 裁决记录 | `arch-<YYYYMMDD>-<HHMM>-verdict-<N>.md`（无则填 `无`） |
 
 ## 1. 缺陷现象
 
@@ -72,11 +79,13 @@ $ pytest tests/test_<defect-id>.py -v
 
 疑似位于：`src/<path>::<function>`
 
-## 7. 裁决记录（由 ARCH / DEV 填写）
+## 7. 处置与指针（发现者维护）
+
+> 裁决本身不写在这里 —— 本文件属于发现者，裁决由 ARCH 另立
+> `arch-*-verdict-*.md`。本段只记状态与去处。
 
 | 字段 | 内容 |
 |---|---|
-| 裁决 | `确认为缺陷` / `契约歧义，转 ARCH 裁决` / `非缺陷` |
-| 裁决人 | `<角色>` |
-| 裁决说明 | `<结论与依据>` |
-| 关联交付 | `<后续修复对应的 docs/releases/<id>.md>` |
+| 处置 | `确认为实现缺陷` / `已转 ARCH 裁决` / `非缺陷（误解）` |
+| 裁决文件 | `arch-<YYYYMMDD>-<HHMM>-verdict-<N>.md`（无则填 `无`） |
+| 关联交付 | `dev-*-release.md`（无则填 `无`） |

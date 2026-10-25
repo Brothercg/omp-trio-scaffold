@@ -3,11 +3,12 @@
 # init-agent.sh —— 把「敏捷三人行」脚手架注入到一个目标项目
 #
 # 做的事情：
-#   1. 创建契约目录：docs/specs docs/releases docs/bugs docs/architecture src tests
-#   2. 注入 .omp/trio/  —— 角色简报、看板模板、写策略真值源
-#   3. 注入 .omp/hooks/pre/trio-guard.ts —— 进程内写前拦截
-#   4. 注入 .git/hooks/pre-commit —— 提交前兜底门禁
-#   5. 注入 tests/trio-policy.test.mjs —— 门禁策略的回归测试
+#   1. 创建目录：docs/task（任务产物聚合层）docs/architecture src tests
+#   2. 注入 .omp/trio/  —— 角色简报、写策略真值源
+#   3. 注入 .omp/trio/templates/ —— 任务产物模板（看板/契约/交付/报告/缺陷/裁决）
+#   4. 注入 .omp/hooks/pre/trio-guard.ts —— 进程内写前拦截
+#   5. 注入 .git/hooks/pre-commit + bin/trio-check-report.mjs —— 提交兜底与报告校验
+#   6. 注入 tests/ —— 门禁策略与报告校验器的回归测试
 #
 # 幂等性：已存在的文件一律不覆盖（打印「跳过」），需要覆盖时显式加 --force。
 #
@@ -143,35 +144,47 @@ printf '目标项目：%s\n' "$TARGET_DIR"
 
 # ── 1. 契约目录 ───────────────────────────────────────────────────────────
 
-printf '[1/5] 契约目录\n'
-for dir in docs/specs docs/releases docs/bugs docs/architecture src tests; do
+printf '[1/6] 工作目录\n'
+for dir in docs/task docs/architecture src tests; do
 	create_dir "${TARGET_DIR}/${dir}"
 done
 
-# ── 2. .omp/trio/ 角色简报与看板 ───────────────────────────────────────────
+# ── 2. .omp/trio/ 角色简报与写策略 ─────────────────────────────────────────
 
-printf '\n[2/5] 角色简报与看板\n'
+printf '\n[2/6] 角色简报与写策略\n'
 create_file "${TARGET_DIR}/.omp/trio/arch.rules.md" "${SCAFFOLD_ROOT}/profiles/arch.rules.md"
 create_file "${TARGET_DIR}/.omp/trio/dev.rules.md" "${SCAFFOLD_ROOT}/profiles/dev.rules.md"
 create_file "${TARGET_DIR}/.omp/trio/test.rules.md" "${SCAFFOLD_ROOT}/profiles/test.rules.md"
-create_file "${TARGET_DIR}/.omp/trio/CURRENT_TASK.md" "${SCAFFOLD_ROOT}/templates/CURRENT_TASK.md"
 create_file "${TARGET_DIR}/.omp/trio/policy.txt" "${SCAFFOLD_ROOT}/.omp/trio/policy.txt"
 
-# ── 3. 进程内写门禁 hook ──────────────────────────────────────────────────
+# ── 3. 任务产物模板 ───────────────────────────────────────────────────────
 
-printf '\n[3/5] 进程内写门禁（omp hook）\n'
+printf '\n[3/6] 任务产物模板\n'
+for template in "${SCAFFOLD_ROOT}"/templates/*.md; do
+	create_file "${TARGET_DIR}/.omp/trio/templates/$(basename "$template")" "$template"
+done
+
+# ── 4. 进程内写门禁 hook ──────────────────────────────────────────────────
+
+printf '\n[4/6] 进程内写门禁（omp hook）\n'
 create_file "${TARGET_DIR}/.omp/hooks/pre/trio-guard.ts" \
 	"${SCAFFOLD_ROOT}/.omp/hooks/pre/trio-guard.ts"
 
-# ── 4. 提交前兜底门禁 ─────────────────────────────────────────────────────
+# ── 5. 提交前兜底门禁 + 报告校验器 ────────────────────────────────────────
 
-printf '\n[4/5] 提交前兜底门禁（git pre-commit）\n'
+printf '\n[5/6] 提交前兜底门禁（git pre-commit）\n'
 create_file "${GIT_DIR_ABS}/hooks/pre-commit" "${SCAFFOLD_ROOT}/templates/pre-commit" "755"
+create_file "${TARGET_DIR}/bin/trio-check-report.mjs" \
+	"${SCAFFOLD_ROOT}/bin/trio-check-report.mjs" "755"
 
-# ── 5. 门禁策略回归测试 ───────────────────────────────────────────────────
+# ── 6. 门禁回归测试 ───────────────────────────────────────────────────────
 
-printf '\n[5/5] 门禁策略回归测试\n'
+printf '\n[6/6] 门禁回归测试\n'
 create_file "${TARGET_DIR}/tests/trio-policy.test.mjs" "${SCAFFOLD_ROOT}/tests/trio-policy.test.mjs"
+create_file "${TARGET_DIR}/tests/trio-check-report.test.mjs" \
+	"${SCAFFOLD_ROOT}/tests/trio-check-report.test.mjs"
+create_file "${TARGET_DIR}/tests/trio-guard.test.mjs" \
+	"${SCAFFOLD_ROOT}/tests/trio-guard.test.mjs"
 
 # ── 汇总 ───────────────────────────────────────────────────────────────────
 

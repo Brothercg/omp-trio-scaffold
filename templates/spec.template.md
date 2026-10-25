@@ -3,7 +3,7 @@
 <!--
 填写人：ARCH（系统架构师 / 技术仲裁者）。本文件由 ARCH 独占写入，DEV 与 QA 只读。
 
-用法：复制本文件到 docs/specs/<task-id>.md 后填写。
+落位：docs/task/<YYYY-MM-DD-事项>/arch-<YYYYMMDD>-<HHMM>-spec.md
 填写规则：
   1. 每个 <...> 占位符都要替换；不适用的整段删除，不要留空占位符。
   2. 接口签名必须精确到类型与可空性 —— DEV 不应需要「猜」参数形态。

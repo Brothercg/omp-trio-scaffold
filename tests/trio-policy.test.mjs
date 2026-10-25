@@ -86,32 +86,42 @@ function assertDenied(role, filePath) {
 
 console.log("\n[角色隔离矩阵]");
 
+const TASK = "docs/task/2026-10-25-login";
+
 check("DEV 可写 src/", () => assertAllowed("dev", "src/a.py"));
 check("DEV 可写 src/ 深层目录", () => assertAllowed("dev", "src/deep/nested/b.py"));
-check("DEV 可写 docs/releases/", () => assertAllowed("dev", "docs/releases/TASK-1.md"));
-check("DEV 禁写 tests/", () => assertDenied("dev", "tests/a.py"));
-check("DEV 禁写 docs/specs/", () => assertDenied("dev", "docs/specs/TASK-1.md"));
+check("DEV 可写自己的交付说明", () => assertAllowed("dev", `${TASK}/dev-20261025-1500-release.md`));
+check("DEV 禁写 tests/（硬红线）", () => assertDenied("dev", "tests/a.py"));
+check("DEV 禁写 ARCH 契约", () => assertDenied("dev", `${TASK}/arch-20261025-0900-spec.md`));
+check("DEV 禁写 QA 报告", () => assertDenied("dev", `${TASK}/qa-20261025-1510-report-x.md`));
 check("DEV 禁写 docs/architecture/", () => assertDenied("dev", "docs/architecture/x.md"));
-check("DEV 禁写 docs/bugs/", () => assertDenied("dev", "docs/bugs/BUG-1.md"));
 
-check("ARCH 可写 docs/specs/", () => assertAllowed("arch", "docs/specs/TASK-1.md"));
+check("ARCH 可写自己的契约", () => assertAllowed("arch", `${TASK}/arch-20261025-0900-spec.md`));
+check("ARCH 可写裁决记录", () => assertAllowed("arch", `${TASK}/arch-20261025-1520-verdict-1.md`));
 check("ARCH 可写 docs/architecture/", () => assertAllowed("arch", "docs/architecture/x.md"));
 check("ARCH 禁写 src/（硬红线）", () => assertDenied("arch", "src/a.py"));
 check("ARCH 禁写 tests/（硬红线）", () => assertDenied("arch", "tests/a.py"));
-check("ARCH 禁写 docs/releases/", () => assertDenied("arch", "docs/releases/TASK-1.md"));
-check("ARCH 禁写 docs/bugs/", () => assertDenied("arch", "docs/bugs/BUG-1.md"));
+check("ARCH 禁写 DEV 交付说明", () => assertDenied("arch", `${TASK}/dev-20261025-1500-release.md`));
+check("ARCH 禁写 QA 报告", () => assertDenied("arch", `${TASK}/qa-20261025-1510-report-x.md`));
 
 check("QA 可写 tests/", () => assertAllowed("qa", "tests/test_a.py"));
-check("QA 可写 docs/bugs/", () => assertAllowed("qa", "docs/bugs/BUG-1.md"));
-check("QA 禁写 src/", () => assertDenied("qa", "src/a.py"));
-check("QA 禁写 docs/specs/", () => assertDenied("qa", "docs/specs/TASK-1.md"));
+check("QA 可写自己的报告", () => assertAllowed("qa", `${TASK}/qa-20261025-1510-report-x.md`));
+check("QA 可写缺陷文档", () => assertAllowed("qa", `${TASK}/qa-20261025-1600-bug-1.md`));
+check("QA 禁写 src/（硬红线）", () => assertDenied("qa", "src/a.py"));
+check("QA 禁写 ARCH 契约", () => assertDenied("qa", `${TASK}/arch-20261025-0900-spec.md`));
+check("QA 禁写 DEV 交付说明", () => assertDenied("qa", `${TASK}/dev-20261025-1500-release.md`));
+
+check("三方均可写任务看板 board.md", () => {
+	assertAllowed("arch", `${TASK}/board.md`);
+	assertAllowed("dev", `${TASK}/board.md`);
+	assertAllowed("qa", `${TASK}/board.md`);
+});
 
 // ── 2. 公共维护区 ──────────────────────────────────────────────────────────
 
 console.log("\n[公共维护区]");
 
 const COMMON = [
-	".omp/trio/CURRENT_TASK.md",
 	"README.md",
 	"CHANGELOG.md",
 	"pyproject.toml",
@@ -142,7 +152,13 @@ for (const file of COMMON) {
 
 console.log("\n[门禁自身保护]");
 
-for (const file of [".omp/hooks/pre/trio-guard.ts", ".omp/trio/policy.txt", "bin/init-agent.sh"]) {
+for (const file of [
+	".omp/hooks/pre/trio-guard.ts",
+	".omp/trio/policy.txt",
+	".git/hooks/pre-commit",
+	"bin/init-agent.sh",
+	"bin/trio-check-report.mjs",
+]) {
 	check(`任何角色都不得写 ${file}`, () => {
 		assertDenied("arch", file);
 		assertDenied("dev", file);
@@ -157,8 +173,21 @@ console.log("\n[fail-closed]");
 check("白名单外的路径一律拒绝", () => {
 	assertDenied("dev", "unknown/file.txt");
 	assertDenied("dev", "docs/other/x.md");
-	assertDenied("arch", "docs/releases/x.md");
-	assertDenied("qa", "docs/releases/x.md");
+	assertDenied("arch", `${TASK}/dev-20261025-1500-release.md`);
+	assertDenied("qa", `${TASK}/arch-20261025-0900-spec.md`);
+});
+
+check("任务文件夹内未带角色前缀的文件一律拒绝", () => {
+	for (const role of ["arch", "dev", "qa"]) {
+		assertDenied(role, `${TASK}/notes.md`);
+		assertDenied(role, `${TASK}/README.md`);
+	}
+});
+
+check("旧路径 docs/specs、docs/releases、docs/bugs 已废止", () => {
+	for (const stale of ["docs/specs/T.md", "docs/releases/T.md", "docs/bugs/B.md"]) {
+		for (const role of ["arch", "dev", "qa"]) assertDenied(role, stale);
+	}
 });
 
 // ── 5. bash 写意图 ─────────────────────────────────────────────────────────
@@ -264,9 +293,10 @@ check("lsp 写动作视为写", () => {
 
 console.log("\n[角色别名兼容]");
 
-check("TRIO_ROLE=pm 与 arch 判定等价（docs/specs/ 可写）", () => {
-	assert.deepEqual(decide(rules, "pm", "docs/specs/T.md"), decide(rules, "arch", "docs/specs/T.md"));
-	assertAllowed("pm", "docs/specs/T.md");
+check("TRIO_ROLE=pm 与 arch 判定等价（契约可写）", () => {
+	const target = `${TASK}/arch-20261025-0900-spec.md`;
+	assert.deepEqual(decide(rules, "pm", target), decide(rules, "arch", target));
+	assertAllowed("pm", target);
 });
 
 check("TRIO_ROLE=pm 仍受 src/ 硬红线约束", () => assertDenied("pm", "src/a.py"));
@@ -331,6 +361,69 @@ check("init-agent.sh 部署 test.rules.md 到 .omp/trio/", () => {
 
 check("已不存在 profiles/pm.rules.md（旧角色已改名）", () => {
 	assert.ok(!fs.existsSync(path.join(SCAFFOLD_PROFILES, "pm.rules.md")), "profiles/pm.rules.md 仍存在");
+});
+
+// ── 9. 模板与部署清单 ─────────────────────────────────────────────────────
+
+console.log("\n[模板与部署清单]");
+
+const TEMPLATES = path.join(SCAFFOLD_ROOT, "templates");
+const EXPECTED_TEMPLATES = [
+	"board.template.md",
+	"spec.template.md",
+	"release.template.md",
+	"report.template.md",
+	"bug.template.md",
+	"verdict.template.md",
+];
+
+for (const template of EXPECTED_TEMPLATES) {
+	check(`模板存在：templates/${template}`, () => {
+		assert.ok(fs.existsSync(path.join(TEMPLATES, template)), `缺少 templates/${template}`);
+	});
+}
+
+check("已废止 templates/CURRENT_TASK.md（由 board.template.md 取代）", () => {
+	assert.ok(!fs.existsSync(path.join(TEMPLATES, "CURRENT_TASK.md")), "旧看板模板仍在");
+});
+
+check("init-agent.sh 创建 docs/task 与 docs/architecture", () => {
+	const script = fs.readFileSync(path.join(SCAFFOLD_ROOT, "bin", "init-agent.sh"), "utf8");
+	assert.match(script, /docs\/task docs\/architecture/, "未创建任务目录");
+});
+
+check("init-agent.sh 不再创建 docs/specs|releases|bugs", () => {
+	const script = fs.readFileSync(path.join(SCAFFOLD_ROOT, "bin", "init-agent.sh"), "utf8");
+	for (const stale of ["docs/specs", "docs/releases", "docs/bugs"]) {
+		assert.ok(!script.includes(stale), `init-agent.sh 仍引用已废止路径：${stale}`);
+	}
+});
+
+check("init-agent.sh 部署报告校验器", () => {
+	const script = fs.readFileSync(path.join(SCAFFOLD_ROOT, "bin", "init-agent.sh"), "utf8");
+	assert.match(script, /bin\/trio-check-report\.mjs/, "未部署 bin/trio-check-report.mjs");
+});
+
+check("init-agent.sh 部署全部模板", () => {
+	const script = fs.readFileSync(path.join(SCAFFOLD_ROOT, "bin", "init-agent.sh"), "utf8");
+	assert.match(script, /templates\/\*\.md/, "未批量部署模板");
+});
+
+check("pre-commit 用 --show-toplevel 定位项目根（worktree 兼容）", () => {
+	const hook = fs.readFileSync(path.join(TEMPLATES, "pre-commit"), "utf8");
+	assert.match(hook, /git rev-parse --show-toplevel/, "未使用 --show-toplevel");
+	// 只看赋值行，避免把解释性注释误判成实现。
+	const assignment = hook.split("\n").filter((line) => line.trim().startsWith("PROJECT_ROOT="));
+	assert.ok(assignment.length > 0, "未找到 PROJECT_ROOT 赋值");
+	for (const line of assignment) {
+		assert.ok(!line.includes("GIT_DIR"), `PROJECT_ROOT 仍在用 GIT_DIR 反推：${line.trim()}`);
+	}
+});
+
+check("pre-commit 对 qa-*-report-*.md 强制跑校验器", () => {
+	const hook = fs.readFileSync(path.join(TEMPLATES, "pre-commit"), "utf8");
+	assert.match(hook, /qa-\*-report-\*\.md/, "未匹配报告文件名");
+	assert.match(hook, /trio-check-report\.mjs/, "未调用校验器");
 });
 
 // ── 汇总 ───────────────────────────────────────────────────────────────────

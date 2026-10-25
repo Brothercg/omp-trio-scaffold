@@ -22,20 +22,21 @@
 
 两层共用同一份策略真值源：`.omp/trio/policy.txt`。
 
-### 二、测试契约独立
+### 二、契约独立于实现
 
-形式化契约（含接口签名与 Given-When-Then）由 ARCH 发布，测试由 QA 独立编写 ——
-二者不看同一份实现的脸色。开发**严禁**修改测试用例来掩盖 Bug；
+形式化契约（接口签名 + Given-When-Then + 极值边界）由 ARCH 发布，
+测试由 QA 独立编写。开发**严禁**修改测试用例来掩盖 Bug；
 QA 发现缺陷必须产出**最小报错复现脚本** + 缺陷文档。
 
-这条约束不是靠提示词自觉，而是靠目录白名单硬隔离：
-Dev 写 `src/`，QA 写 `tests/`，两边目录不相交，物理上无法越界。
+这条约束不是靠提示词自觉，而是靠目录白名单硬隔离。
 
-### 三、消除遗忘与越权
+### 三、机械门禁优先于纪律
 
-- **消除遗忘**：每个角色一份独立 System Prompt 简报（`--append-system-prompt` 注入），
-  角色职责、禁止项、白名单、协作方式全部落盘可查。
-- **消除越权**：策略在 `.omp/trio/policy.txt` 一处定义，hook 与 pre-commit 同步消费。
+- 越权写入 → hook 当场拒绝
+- 越权提交 → pre-commit 拒绝
+- 报告造假（SKIP 计入 PASS、总判定与逐条不一致）→ 校验器拒绝提交
+
+三条都有可执行的检查，不依赖「请大家自觉」。
 
 ---
 
@@ -44,27 +45,28 @@ Dev 写 `src/`，QA 写 `tests/`，两边目录不相交，物理上无法越界
 ```
 omp-trio-scaffold/
 ├── bin/
-│   ├── init-agent.sh         把脚手架注入目标项目
-│   ├── start-agent.sh        以指定角色启动 omp
-│   └── trio-selftest.sh      一键自测门禁是否生效
-├── profiles/                 角色简报（出厂源）
-│   ├── arch.rules.md         ARCH：系统架构师 / 技术仲裁者
-│   ├── dev.rules.md          DEV：高级软件开发工程师
-│   └── test.rules.md         QA：对抗性质检与边界测试专家
-├── templates/                契约模板（出厂源）
-│   ├── spec.template.md      验收契约
-│   ├── release.template.md   交付说明
-│   ├── bug.template.md       缺陷文档
-│   ├── CURRENT_TASK.md       任务看板模板
-│   └── pre-commit            提交门禁脚本
-├── .omp/                     脚手架自身的运行时副本
-│   ├── trio/
-│   │   ├── arch.rules.md / dev.rules.md / test.rules.md
-│   │   ├── CURRENT_TASK.md   运行时看板实体
-│   │   └── policy.txt        写策略单一真值源
-│   └── hooks/pre/trio-guard.ts   进程内写门禁
+│   ├── init-agent.sh            把脚手架注入目标项目
+│   ├── start-agent.sh           以指定角色启动 omp
+│   ├── trio-check-report.mjs    验收报告机械校验器
+│   └── trio-selftest.sh         一键自测门禁是否生效
+├── profiles/                    角色简报（出厂源）
+│   ├── arch.rules.md            ARCH：系统架构师 / 技术仲裁者
+│   ├── dev.rules.md             DEV：高级软件开发工程师
+│   └── test.rules.md            QA：对抗性质检与边界测试专家
+├── templates/                   任务产物模板（出厂源）
+│   ├── board.template.md        任务看板（状态机 + AC 进度 + 阻塞 + 决策）
+│   ├── spec.template.md         技术契约（接口签名 + AC + 极值）
+│   ├── release.template.md      交付说明（含验收清单）
+│   ├── report.template.md       验收报告（四值结论域）
+│   ├── bug.template.md          缺陷 / 契约缺口
+│   ├── verdict.template.md      ARCH 裁决记录
+│   └── pre-commit               提交门禁脚本
+├── .omp/                        脚手架自身的运行时副本
+│   ├── trio/{arch,dev,test}.rules.md + policy.txt
+│   └── hooks/pre/trio-guard.ts  进程内写门禁
 ├── tests/
-│   └── trio-policy.test.mjs  门禁契约回归测试
+│   ├── trio-policy.test.mjs     门禁策略回归测试
+│   └── trio-check-report.test.mjs  报告校验器回归测试
 ├── README.md
 ├── .gitignore
 └── .gitattributes
@@ -77,16 +79,23 @@ omp-trio-scaffold/
 ```
 <项目>/
 ├── .omp/
-│   ├── trio/            角色简报 + 看板 + 策略
+│   ├── trio/
+│   │   ├── {arch,dev,test}.rules.md   角色简报
+│   │   ├── policy.txt                 写策略真值源
+│   │   └── templates/                 任务产物模板
 │   └── hooks/pre/trio-guard.ts
 ├── .git/hooks/pre-commit
+├── bin/trio-check-report.mjs          报告校验器
 ├── docs/
-│   ├── specs/           ARCH 独占：形式化契约（接口签名 + AC）
-│   ├── architecture/    ARCH 独占：ADR 与架构决策
-│   ├── releases/        DEV 独占：交付说明
-│   └── bugs/            QA 独占：缺陷文档
-├── src/                 DEV 独占：业务实现
-└── tests/               QA 独占：测试与复现脚本
+│   ├── task/                          任务产物聚合层（一个任务一个文件夹）
+│   │   └── 2026-10-25-登录改造/
+│   │       ├── board.md               看板（三方共写）
+│   │       ├── arch-20261025-0900-spec.md
+│   │       ├── dev-20261025-1500-release.md
+│   │       └── qa-20261025-1510-report-登录覆盖.md
+│   └── architecture/                  跨任务 ADR（ARCH 独占）
+├── src/                               DEV 独占：业务实现
+└── tests/                             QA 独占：测试与复现脚本
 ```
 
 ---
@@ -98,81 +107,98 @@ cd /path/to/omp-trio-scaffold
 bin/init-agent.sh /path/to/your-project
 ```
 
-参数：
-
 | 参数 | 说明 |
 |---|---|
 | `<目标项目路径>` | 要初始化的项目目录，默认当前目录 |
 | `--force` | 覆盖已存在的文件（默认**不覆盖**，只打印「跳过」） |
 
-`init-agent.sh` 会：
-
-1. 创建 `docs/{specs,releases,bugs,architecture}`、`src/`、`tests/`
-2. 注入 `.omp/trio/`（角色简报 + 看板 + 策略真值源）
-3. 注入 `.omp/hooks/pre/trio-guard.ts`
-4. 安装 `.git/hooks/pre-commit`（755 可执行）
-
 **前置条件**：目标目录必须已是 git 仓库（pre-commit 门禁依赖 git）。
 
 ---
 
-## 推荐的 3 窗口操作时序
-
-### 准备
+## 启动三角色
 
 ```bash
-bin/init-agent.sh ~/projects/my-app
-cd ~/projects/my-app
+bin/start-agent.sh arch      # 系统架构师
+bin/start-agent.sh dev       # 开发
+bin/start-agent.sh qa        # 对抗测试
 ```
 
-### 开三个终端
+`start-agent.sh` 在当前终端直接启动 `omp`（不新开窗口），它会：
+1. 导出 `TRIO_ROLE` —— 门禁的身份来源（hook 与 pre-commit 共用）
+2. 用 `--append-system-prompt` 注入对应角色简报
+
+> **别名**：`pm` 是 `arch` 的历史名称，`bin/start-agent.sh pm` 仍可用，
+> 会打印一行提示后按 `arch` 启动。`TRIO_ROLE=pm` 同理。
+
+---
+
+## 任务工作流
+
+### 一、建任务文件夹
 
 ```bash
-# 终端 A —— ARCH（系统架构师）
-bin/start-agent.sh arch
-
-# 终端 B —— DEV
-bin/start-agent.sh dev
-
-# 终端 C —— QA
-bin/start-agent.sh qa
+mkdir -p docs/task/2026-10-25-登录改造
+cp .omp/trio/templates/board.template.md docs/task/2026-10-25-登录改造/board.md
+cp .omp/trio/templates/spec.template.md  docs/task/2026-10-25-登录改造/arch-20261025-0900-spec.md
 ```
 
-`start-agent.sh` 在当前终端直接启动 `omp`（不新开窗口），窗口由你手动开。
-它会导出 `TRIO_ROLE`（门禁的身份来源），并用 `--append-system-prompt`
-注入对应角色简报。
-
-### 时序
+### 二、产物命名规范
 
 ```
-┌─────────────┬──────────────────────────┬──────────────────────────┐
-│ 阶段         │ ARCH                     │ DEV / QA                 │
-├─────────────┼──────────────────────────┼──────────────────────────┤
-│ 1 契约       │ 写 docs/specs/<id>.md    │ （等待，读契约）          │
-│             │ 接口签名 + AC + 极值      │                          │
-├─────────────┼──────────────────────────┼──────────────────────────┤
-│ 2 实现       │ 更新看板 → spec_agreed   │ DEV 读契约 → 写 src/     │
-│             │                          │ QA 读契约 → 写 tests/    │
-├─────────────┼──────────────────────────┼──────────────────────────┤
-│ 3 交付       │                          │ DEV 写 docs/releases/    │
-│             │                          │ （含真实检查结果）        │
-├─────────────┼──────────────────────────┼──────────────────────────┤
-│ 4 对抗       │ 裁决契约歧义             │ QA 跑测试 → 失败则       │
-│             │                          │ 写 docs/bugs/ +           │
-│             │                          │ tests/repro/ 最小复现     │
-├─────────────┼──────────────────────────┼──────────────────────────┤
-│ 5 修复       │ 更新看板 → testing       │ DEV 读缺陷文档 → 修 src/ │
-│             │                          │ （不碰 tests/）           │
-├─────────────┼──────────────────────────┼──────────────────────────┤
-│ 6 验收       │ 契约升版（若需）          │ QA 复测 → 全绿 → done    │
-└─────────────┴──────────────────────────┴──────────────────────────┘
+<角色>-<YYYYMMDD>-<HHMM>-<主题>.md
 ```
 
-三条铁律在时序中体现为：
+| 例子 | 说明 |
+|---|---|
+| `arch-20261025-0900-spec.md` | 契约 |
+| `arch-20261025-1520-verdict-1.md` | 裁决记录 |
+| `dev-20261025-1500-release.md` | 交付说明（含验收清单） |
+| `qa-20261025-1510-report-登录覆盖.md` | 验收报告 |
+| `qa-20261025-1600-bug-1.md` | 缺陷 / 契约缺口 |
+| `board.md` | 看板（唯一无角色前缀的文件，三方共写） |
 
-- ARCH 写完契约前，DEV/QA 只能读、不能猜。
-- DEV 遇到测试失败时改 `src/`，**不改** `tests/`；契约本身有问题时写进交付说明交 ARCH 裁决。
-- QA 发现缺陷时**只报告不修复** —— 越权改 `src/` 会污染缺陷真相。
+- 时间戳取**完整日期 + 时分**：任务跨天时纯 `HHMM` 会错序。
+- 主题自由文本；**报告**的 topic 段必须以 `report` 开头（pre-commit 据此识别）。
+- 同一分钟写入多份 → 追加 `-2`、`-3`。
+
+### 三、状态机
+
+```mermaid
+stateDiagram-v2
+    [*] --> spec_draft
+    spec_draft --> spec_agreed: ARCH 定稿
+    spec_agreed --> implementing: DEV 开工
+    implementing --> testing: DEV 交付
+    testing --> implementing: QA 判未通过
+    testing --> qa_passed: QA 全绿
+    qa_passed --> user_signed: 用户终验签字
+    user_signed --> [*]
+    spec_draft --> blocked
+    spec_agreed --> blocked
+    implementing --> blocked
+    testing --> blocked
+    blocked --> implementing
+    implementing --> waiting_user
+    testing --> waiting_user
+    qa_passed --> waiting_user
+    waiting_user --> implementing
+    waiting_user --> testing
+    waiting_user --> qa_passed
+```
+
+| 状态 | 含义 | 唯一有权推进者 |
+|---|---|---|
+| `spec_draft` | 契约撰写中，AC 未定稿 | **ARCH** |
+| `spec_agreed` | AC 定稿，DEV / QA 可开工 | **ARCH** |
+| `implementing` | 实现进行中 | **DEV** |
+| `testing` | 实现已交付，QA 验证中 | **QA** |
+| `qa_passed` | 机械标准清零 | **QA** |
+| `user_signed` | 用户终验签字，任务关闭 | **用户** |
+| `blocked` | 技术/依赖/契约缺口，待 ARCH 或外部条件 | 提出方 |
+| `waiting_user` | 待用户决策或终验签字，**同轮 MUST NOT 继续实施** | 提出方 |
+
+> **通过 = 机械清零 + 用户终验签字**，缺一不可。任何角色的「没问题」汇报不作数。
 
 ---
 
@@ -186,8 +212,7 @@ deny  <role> <glob>       该角色禁止写入该路径
 ```
 
 - `<role>`：`arch` / `dev` / `qa` / `*`（所有角色）
-- 别名：`pm` 是 `arch` 的历史名称，hook 与 pre-commit 在匹配前自动归一化。
-  旧策略文件里的 `allow pm ...` 仍然生效，无需迁移。
+- 别名：`pm` 是 `arch` 的历史名称，消费方在匹配前自动归一化
 - 判定：**deny 优先**；deny 未命中但 allow 命中则允许；两者都没命中则**拒绝**（fail-closed）
 - 路径相对于项目根目录；`*` 匹配任意字符（含 `/`）
 
@@ -195,13 +220,13 @@ deny  <role> <glob>       该角色禁止写入该路径
 
 | 路径 | ARCH | DEV | QA |
 |---|:---:|:---:|:---:|
-| `docs/specs/**` | ✅ 写 | ❌ | ❌ |
+| `docs/task/*/arch-*.md` | ✅ 写 | ❌ | ❌ |
 | `docs/architecture/**` | ✅ 写 | ❌ | ❌ |
-| `docs/releases/**` | ❌ | ✅ 写 | ❌ |
-| `docs/bugs/**` | ❌ | ❌ | ✅ 写 |
+| `docs/task/*/dev-*.md` | ❌ | ✅ 写 | ❌ |
+| `docs/task/*/qa-*.md` | ❌ | ❌ | ✅ 写 |
 | `src/**` | ❌ | ✅ 写 | ❌ |
 | `tests/**` | ❌ | ❌ | ✅ 写 |
-| `.omp/trio/CURRENT_TASK.md` | ✅ | ✅ | ✅ |
+| `docs/task/*/board.md` | ✅ | ✅ | ✅ |
 | 公共维护区 | ✅ | ✅ | ✅ |
 
 公共维护区（三方均可写）：`README.md`、`CHANGELOG.md`、`pyproject.toml`、
@@ -210,122 +235,130 @@ deny  <role> <glob>       该角色禁止写入该路径
 `.gitignore`、`.gitattributes`、`.github/workflows/*`。
 
 门禁自身（`.omp/hooks/**`、`.omp/trio/policy.txt`、`.git/hooks/pre-commit`、
-`bin/**`）对任何角色都是 deny —— 否则 Dev 可以改 hook 来解除对自己的限制。
+`bin/**`）对任何角色都是 deny —— 否则被约束者可以自行解除限制。
 
-### 被拦截的写通道
+### 为什么任务文件夹用文件名前缀而不是子目录
 
-hook 覆盖 omp 的全部落盘通道：
+一个任务的全部痕迹平铺在同一目录，`ls` 一次就能按时间读出
+spec → release → report → bug 的完整链路。改成 `arch/`、`dev/`、`qa/` 三个子目录，
+等于把刚合并的视图重新拆开。代价是隔离契约从「目录」降级为「文件名前缀」——
+门禁管得到写入，管不到内容语义，这与原来的信任等级一致。
 
-| 工具 | 路径来源 |
+---
+
+## 验收报告校验
+
+报告是「任务通过」的唯一凭据，因此**提交时强制机械校验**：
+
+```bash
+bun bin/trio-check-report.mjs docs/task/<slug>/qa-20261025-1510-report-x.md
+```
+
+| 规则 | 内容 |
 |---|---|
-| `write` | `path` |
-| `edit` | `path`（replace/patch）或 `input` 里的 `*** Update File:` 标记（apply_patch） |
-| `ast_edit` | `paths[]` |
-| `bash` | `command` —— **写意图正则 AND 禁写路径同时命中**才拦 |
-| `lsp` | `file` —— 仅 `rename` / `rename_file` / `code_actions`+`apply` 视为写 |
-| `eval` | `code` 里的文件路径字面量 |
+| T1 | 文件名 `qa-<YYYYMMDD>-<HHMM>-report-<主题>.md` |
+| T2 | 表头三字段（运行环境含版本号 / 基线 commit / 运行时间与文件名同源）各一次 |
+| T3 | 唯一 4 列结果表 `用例\|位置\|结论\|说明` + 分隔行 + 至少一行 |
+| T4 | 用例主键非空且不重复 |
+| T5 | 通过 → 位置填 `—`；其余必填（文件:行 / 函数） |
+| T6 | 结论四值：`通过` / `半通过` / `未通过` / `SKIP` |
+| T7 | 未通过/半通过 → 说明含 期望/实际/复现；SKIP → 跳过原因/解除条件 |
+| T8 | 汇总非表格；总判定与逐行结论机械推导一致；SKIP 单列计账 |
+| T9 | 仅 Markdown，禁伴随 `.json/.csv/.xlsx/.parquet` |
 
-bash 通道用「写意图 + 禁写路径」双条件，是为了让只读命令正常通过：
-`ls tests/`、`cat docs/specs/x.md`、`pytest` 都不拦，
-只有 `echo x > tests/a.py`、`sed -i ... tests/`、`cp ... src/` 这类真落盘才被阻断。
+`templates/pre-commit` 在暂存区出现 `docs/task/*/qa-*-report-*.md` 时自动调用它，
+不合规直接拒绝提交；`bun` 缺失时 fail-closed。
 
-### pre-commit 兜底
+**半通过 / 未通过的判定口径**：
 
-`.git/hooks/pre-commit` 读取暂存区文件列表，按同一份策略复核：
-
-- `TRIO_ROLE` 未设置 → **放行**（人工提交是合法逃生舱）
-- `TRIO_ROLE` 非法值 → 拒绝
-- 策略文件缺失 → 拒绝（fail-closed）
-
----
-
-## 角色身份来源
-
-`TRIO_ROLE` 环境变量，由 `bin/start-agent.sh` 导出。
-
-- 进程内 hook 直接读 `process.env.TRIO_ROLE`
-- `git commit` 由 Agent 在 omp 进程内发起时继承同一环境变量，
-  所以 pre-commit 也能读到正确身份
-- 手工在另一个终端提交时没有该变量 → 放行（决策：人工介入优先）
+| 档位 | 判据 |
+|---|---|
+| `通过` | 该 AC 的全部子项通过 |
+| `半通过` | 主路径全过，边界/异常/非功能至少一项未过 |
+| `未通过` | 至少一项主路径未过 |
 
 ---
 
-## 模型选择
+## 多任务并行与 worktree
 
-脚手架**不内置**任何模型名绑定，只透传环境变量：
-
-```bash
-TRIO_MODEL=opus bin/start-agent.sh dev
-```
-
-不设则用 omp 当前默认模型。
-
-想让 QA 具备真正的对抗独立性（与 Dev 用不同模型），只需给 QA 窗口设不同的
-`TRIO_MODEL`：
+同一任务内的三个角色**共享同一个工作树** —— QA 必须能立刻看到 DEV 写的 `src/`。
+跨任务并行时，每个任务一个 worktree：
 
 ```bash
-# 终端 B
-TRIO_MODEL=opus bin/start-agent.sh dev
-# 终端 C
-TRIO_MODEL=gpt-5.2 bin/start-agent.sh qa
+git worktree add ../wt-task-b -b feat/task-b
 ```
+
+- 角色身份靠 `TRIO_ROLE`，与所在工作树无关，因此每个 worktree 里跑
+  `bin/start-agent.sh <role>` 即生效。
+- `templates/pre-commit` 用 `git rev-parse --show-toplevel` 定位项目根，
+  linked worktree 下也正确（早期用 `$GIT_DIR/..` 会落到 `.git/worktrees` 上）。
+- 任务目录随分支走，不同任务的分支互不触碰同一个文件 → 合并零冲突。
+
+---
+
+## 四条铁律
+
+1. **契约先行**：ARCH 写完 AC 之前，DEV / QA 只能读、不能猜。
+2. **测试独立**：DEV 不改 `tests/`，QA 不改 `src/`；契约有错走 `contract-gap` 请 ARCH 裁决。
+3. **只报不修**：QA 发现缺陷只报告 —— 越权改 `src/` 会污染缺陷真相。
+4. **commit 纪律**：多角色共享工作树，commit MUST 显式 pathspec。
+   **严禁** `git add -A` / `git add .` —— 会盲扫吞掉他人未完成的 WIP。
+
+**3 轮熔断**：「QA 判未通过 → DEV 修 → QA 复测仍未通过」计 1 轮。
+连续 3 轮未全绿必须停手，在看板记 `blocked` 并写明四项：
+失败条目 / 已试修法 / 根因分歧 / 建议。
 
 ---
 
 ## 自测
 
-### 一键自测（推荐）
+### 一键自测
 
 ```bash
 bin/trio-selftest.sh /path/to/your-project
 ```
 
-七段验证，全部通过才算门禁生效：
+八段验证：
 
 | 阶段 | 验证内容 |
 |---|---|
-| 1/7 | 安装完整性：hook、策略、pre-commit 三个文件都在且可执行 |
-| 2/7 | 准备测试夹具 |
-| 3/7 | 门禁策略单元测试（71 项契约断言） |
-| 4/7 | pre-commit 兜底：`TRIO_ROLE=dev` 提交 `tests/` 被拒、提交 `src/` 放行、无角色时放行 |
-| 5/7 | **真实 omp 调用**：`write` → `src/` 放行、`write` → `tests/` 被拦、`edit` → `src/` 放行、`bash` → `tests/` 被拦 |
-| 6/7 | 角色白名单：`TRIO_ROLE=qa` 写 `src/` 被拦 |
-| 7/7 | 清理夹具 |
+| 1/8 | 安装完整性：hook、策略、校验器、pre-commit、模板 |
+| 2/8 | 准备测试夹具 |
+| 3/8 | 策略契约 + 报告契约的单元测试 |
+| 4/8 | pre-commit 角色门禁：越权拒绝、合规放行、无角色放行 |
+| 5/8 | pre-commit 报告硬门禁：不合规报告被拒 |
+| 6/8 | **真实 omp**：write/edit/bash 三通道 |
+| 7/8 | 角色白名单：QA 写 `src/` 被拦 |
+| 8/8 | 清理夹具 |
 
-跳过真实 omp 调用（只跑静态检查与 pre-commit）：
+跳过真实 omp 调用：
 
 ```bash
 bin/trio-selftest.sh --fast /path/to/your-project
 ```
 
-### 手动快速自测（三条命令）
-
-不想跑整套时，在目标项目里直接验证三通道拦截：
+### 手动快速自测
 
 ```bash
 cd /path/to/your-project
 
-# 1. write 通道：Dev 写 tests/ 应被拦，写 src/ 应放行
-TRIO_ROLE=dev omp -p '用 write 工具创建 tests/x.txt，然后再用 write 工具创建 src/ok.txt。分别报告成功或被拦。'
+# 1. write 通道：DEV 写 tests/ 应被拦，写 src/ 应放行
+TRIO_ROLE=dev omp -p '用 write 工具创建 tests/x.txt，然后再创建 src/ok.txt。分别报告成功或被拦。'
 
 # 2. bash 通道：写意图被拦，只读放行
-TRIO_ROLE=dev omp -p '用 bash 工具执行: echo bad > tests/x.txt 。然后用 bash 工具执行: ls tests/ 。分别报告结果。'
+TRIO_ROLE=dev omp -p '先用 bash 执行: echo bad > tests/x.txt。再执行: ls tests/。分别报告结果。'
 
-# 3. pre-commit 兜底：有角色被拒，无角色放行
-git add tests/ && TRIO_ROLE=dev git commit -m probe   # 期望：拒绝
-git add tests/ && git commit -m probe                 # 期望：放行（无角色标记）
+# 3. pre-commit 兜底
+git add tests/ && TRIO_ROLE=dev git commit -m probe   # 期望拒绝
+git add tests/ && git commit -m probe                 # 期望放行
 ```
 
-### 门禁策略回归测试
-
-策略契约有独立测试，改了 `.omp/trio/policy.txt` 就该跑它：
+### 单元测试
 
 ```bash
-bun tests/trio-policy.test.mjs
+bun tests/trio-policy.test.mjs        # 门禁策略契约
+bun tests/trio-check-report.test.mjs  # 报告校验器契约
 ```
-
-71 项断言，覆盖角色矩阵、公共维护区、门禁自身保护、fail-closed、
-bash 写意图与只读放行、`edit`/`eval` 路径提取、`lsp` 读写动作区分。
 
 ---
 
@@ -334,11 +367,11 @@ bash 写意图与只读放行、`edit`/`eval` 路径提取、`lsp` 读写动作�
 - **hook 拦不住 `eval` 里的全部写法**：只匹配代码中的文件路径字面量，
   运行时拼接出来的路径无法静态识别。
 - **hook 拦不住「路径藏在文件里」的写操作**：`patch -p1 < fix.patch`、
-  `python script.py`（脚本内部自行写盘）等形式，命令文本里没有目标路径，
-  静态分析无从判断。这类操作仍会被 pre-commit 在提交时兜住。
-- **hook 拦不住绕过 omp 的写入**：Agent 在 omp 外执行的 `git commit` 不经过 hook，
-  但仍会经过 pre-commit 兜底；直接手改文件则两者都拦不住 —— 这是终端工具的固有边界。
-- **pre-commit 只能看到暂存区路径**，看不到「是谁改的」，因此角色判定完全依赖
-  `TRIO_ROLE` 环境变量。
-- **三个 Agent 共享同一工作树**：靠目录白名单隔离，不做 worktree 隔离。
-  好处是 QA 能立刻看到 Dev 的实现；代价是三者共用同一个 git index。
+  `python script.py`（脚本内部自行写盘）等形式，命令文本里没有目标路径。
+  这类操作仍会被 pre-commit 在提交时兜住。
+- **hook 拦不住绕过 omp 的写入**：直接手改文件两者都拦不住 —— 终端工具的固有边界。
+- **pre-commit 看不到「是谁改的」**，角色判定完全依赖 `TRIO_ROLE` 环境变量。
+- **文件名前缀是隔离契约的一部分**：一个角色可以给文件起误导性主题名，
+  门禁管不到内容语义。
+- **`tests/trio-*.test.mjs` 归 QA 所有**：QA 可以修改门禁契约测试本身。
+  pre-commit 只能保证 DEV 不改 `tests/`。

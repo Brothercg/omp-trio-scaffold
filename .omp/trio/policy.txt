@@ -12,7 +12,7 @@
 # ── 匹配语义 ──────────────────────────────────────────────────────────────
 #   路径相对于项目根目录（POSIX 分隔符）。
 #   '*' 匹配任意字符（含 '/'）；'**' 等价于 '*'。
-#   例：'docs/specs/**' 匹配 docs/specs/ 下任意深度的文件。
+#   例：'docs/task/*/arch-*.md' 匹配任意任务目录下以 arch- 开头的文件。
 #       'requirements*.txt' 匹配 requirements.txt、requirements-dev.txt。
 #
 # ── 判定语义（deny 优先）──────────────────────────────────────────────────
@@ -34,10 +34,12 @@
 # 公共维护区：三方均可写
 # ─────────────────────────────────────────────────────────────────────────────
 
-# 看板与说明
-allow * .omp/trio/CURRENT_TASK.md
+# 说明与版本
 allow * README.md
 allow * CHANGELOG.md
+
+# 任务看板：每个任务文件夹一份，三方共写（无角色前缀，故显式放行）
+allow * docs/task/*/board.md
 
 # 依赖与打包
 allow * pyproject.toml
@@ -61,33 +63,41 @@ allow * .github/workflows/*
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ARCH：系统架构师 / 技术仲裁者（别名 pm，由消费方归一化）
+#   独占：docs/task/*/arch-*.md（契约、ADR 指针、裁决记录）
+#         docs/architecture/**（跨任务的 ADR）
 # ─────────────────────────────────────────────────────────────────────────────
-allow arch docs/specs/**
+allow arch docs/task/*/arch-*.md
 allow arch docs/architecture/**
-deny  arch src/**
-deny  arch tests/**
+
+# 硬红线：契约发布者不得碰实现与测试（改这两处等于自己给自己判卷）
+deny arch src/**
+deny arch tests/**
 
 # ─────────────────────────────────────────────────────────────────────────────
 # DEV：高级软件开发工程师
+#   独占：docs/task/*/dev-*.md（交付说明与验收清单）
+#         src/**（业务实现）
 # ─────────────────────────────────────────────────────────────────────────────
+allow dev docs/task/*/dev-*.md
 allow dev src/**
-allow dev docs/releases/**
-deny  dev tests/**
-deny  dev docs/specs/**
-deny  dev docs/architecture/**
+
+# 硬红线：不得修改测试（测试是 QA 与 ARCH 的契约载体）
+deny dev tests/**
 
 # ─────────────────────────────────────────────────────────────────────────────
 # QA：对抗性质检与边界测试专家
+#   独占：docs/task/*/qa-*.md（验收报告、缺陷文档、最小复现）
+#         tests/**（测试用例与复现脚本）
 # ─────────────────────────────────────────────────────────────────────────────
+allow qa docs/task/*/qa-*.md
 allow qa tests/**
-allow qa docs/bugs/**
-deny  qa src/**
-deny  qa docs/specs/**
-deny  qa docs/architecture/**
+
+# 硬红线：不得修改业务实现（发现缺陷只报告，修复是 DEV 的职责）
+deny qa src/**
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 门禁自身的保护：任何角色都不得改写门禁逻辑或策略
-# （否则 Dev 可以通过改 hook 解除对自己的限制）
+# （否则被约束者可以自行解除限制）
 # ─────────────────────────────────────────────────────────────────────────────
 deny * .omp/hooks/**
 deny * .omp/trio/policy.txt

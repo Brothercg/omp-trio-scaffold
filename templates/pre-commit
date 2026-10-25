@@ -7,6 +7,11 @@
 #   - hook      ：实时拦截，阻止越权写入落盘
 #   - pre-commit：提交前复核暂存区，防止绕过 hook 的路径（如手工 git add）
 #
+# 本 hook 承担两道检查：
+#   1. 角色写权：暂存区路径必须落在当前角色的白名单内（策略见 policy.txt）
+#   2. 报告合规：暂存的验收报告（docs/task/*/qa-*-report-*.md）必须通过
+#      bin/trio-check-report.mjs 的机械校验（SKIP 不得计入通过等）
+#
 # 角色身份来自环境变量 TRIO_ROLE（arch / dev / qa）。
 # 别名：'pm' 是 'arch' 的兼容别名，收到后自动归一化（旧环境变量不必改）。
 # 未设置 TRIO_ROLE 时放行 —— 人工提交是合法逃生舱，本 hook 只做角色维度的校验。
@@ -44,12 +49,13 @@ esac
 
 # ── 定位项目根与策略文件 ───────────────────────────────────────────────────
 
-GIT_DIR="$(git rev-parse --git-dir 2>/dev/null)" || {
-	log_error "不在 git 仓库中，跳过"
+# 用 --show-toplevel 而非 $GIT_DIR/.. —— 在 linked worktree 中
+# $GIT_DIR 是 <main>/.git/worktrees/<name>，反推会落到 .git/worktrees 上。
+PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+	log_error "不在 git 工作树中，跳过"
 	exit 0
 }
-GIT_DIR="$(cd "$GIT_DIR" && pwd)"
-PROJECT_ROOT="$(cd "$GIT_DIR/.." && pwd)"
+PROJECT_ROOT="$(cd "$PROJECT_ROOT" && pwd)"
 POLICY_FILE="${PROJECT_ROOT}/${POLICY_REL}"
 
 if [[ ! -f "$POLICY_FILE" ]]; then
@@ -135,6 +141,46 @@ if [[ ${#violations[@]} -gt 0 ]]; then
 	log_error "策略来源：${POLICY_REL}"
 	log_error "若为误判，请修改 ${POLICY_REL} 后重试，或人工提交（git commit --no-verify）。"
 	exit 1
+fi
+
+# ── 验收报告机械校验 ───────────────────────────────────────────────────────
+# 暂存区出现 qa-*-report-*.md 时强制跑校验器：报告是「通过」判定的唯一凭据，
+# 不允许未经机械校验的报告进入历史（SKIP 计入 PASS 等假绿由校验器拦截）。
+# 清单（*-checklist-*）与其它文档不在本段管辖范围。
+
+REPORTS=()
+while IFS= read -r staged; do
+	[[ -z "$staged" ]] && continue
+	case "$staged" in
+		docs/task/*/qa-*-report-*.md) REPORTS+=("$staged") ;;
+	esac
+done <<<"$STAGED"
+
+if [[ ${#REPORTS[@]} -gt 0 ]]; then
+	# trio 的运行前提就是 omp + bun（hook 本身是 TS）；缺失即环境不合法，fail-closed。
+	if ! command -v bun >/dev/null 2>&1; then
+		log_error "需要 bun 校验验收报告，但 PATH 中找不到 bun"
+		log_error "安装 bun，或用 git commit --no-verify 人工绕过（不推荐）。"
+		exit 1
+	fi
+	VALIDATOR="${PROJECT_ROOT}/bin/trio-check-report.mjs"
+	if [[ ! -f "$VALIDATOR" ]]; then
+		log_error "验收报告校验器缺失：bin/trio-check-report.mjs"
+		log_error "重新运行 bin/init-agent.sh 部署校验器。"
+		exit 1
+	fi
+	failed=0
+	for report in "${REPORTS[@]}"; do
+		if ! bun "$VALIDATOR" "${PROJECT_ROOT}/${report}" >/dev/null 2>&1; then
+			log_error "验收报告不合规：${report}"
+			bun "$VALIDATOR" "${PROJECT_ROOT}/${report}" >&2 || true
+			failed=1
+		fi
+	done
+	if [[ "$failed" -ne 0 ]]; then
+		log_error "修复上述违规后重新 git add 该报告。"
+		exit 1
+	fi
 fi
 
 exit 0
