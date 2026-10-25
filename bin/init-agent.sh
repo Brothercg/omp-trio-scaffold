@@ -8,7 +8,7 @@
 #   3. 注入 .omp/trio/templates/ —— 任务产物模板（看板/契约/交付/报告/缺陷/裁决）
 #   4. 注入 .omp/hooks/pre/trio-guard.ts —— 进程内写前拦截
 #      注入 .omp/extensions/trio-session-name.ts —— 会话名自动设为角色
-#   5. 注入 .git/hooks/pre-commit + bin/trio-check-report.mjs —— 提交兜底与报告校验
+#   5. 注入 .git/hooks/pre-commit + pre-push + bin/trio-check-report.mjs —— 提交兜底与报告校验
 #   6. 注入 tests/ —— 门禁策略与报告校验器的回归测试
 #
 # 幂等性：已存在的文件一律不覆盖（打印「跳过」），需要覆盖时显式加 --force。
@@ -181,6 +181,7 @@ create_file "${TARGET_DIR}/.omp/extensions/trio-session-name.ts" \
 
 printf '\n[5/6] 提交前兜底门禁（git pre-commit）\n'
 create_file "${GIT_DIR_ABS}/hooks/pre-commit" "${SCAFFOLD_ROOT}/templates/pre-commit" "755"
+create_file "${GIT_DIR_ABS}/hooks/pre-push" "${SCAFFOLD_ROOT}/templates/pre-push" "755"
 create_file "${TARGET_DIR}/bin/trio-check-report.mjs" \
 	"${SCAFFOLD_ROOT}/bin/trio-check-report.mjs" "755"
 

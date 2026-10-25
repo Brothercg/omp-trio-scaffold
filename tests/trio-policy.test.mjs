@@ -123,10 +123,6 @@ console.log("\n[公共维护区]");
 
 const COMMON = [
 	"README.md",
-	"CHANGELOG.md",
-	"pyproject.toml",
-	"setup.cfg",
-	"setup.py",
 	"requirements.txt",
 	"requirements-dev.txt",
 	"uv.lock",
@@ -145,6 +141,17 @@ for (const file of COMMON) {
 		assertAllowed("arch", file);
 		assertAllowed("dev", file);
 		assertAllowed("qa", file);
+	});
+}
+
+// 发布链（ADR-0001）：version bump + CHANGELOG 截版收窄为 DEV 独占
+console.log("\n[发布链：DEV 独占]");
+
+for (const file of ["CHANGELOG.md", "pyproject.toml", "setup.cfg", "setup.py"]) {
+	check(`仅 DEV 可写 ${file}`, () => {
+		assertAllowed("dev", file);
+		assertDenied("arch", file);
+		assertDenied("qa", file);
 	});
 }
 

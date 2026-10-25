@@ -12,6 +12,17 @@
    - **验收清单**（可判定断言 + 契约指针，不含结论）
    - 本地静态检查与自测的**真实输出摘要**（Ruff / Pyright / pytest）
 3. **自测**：在实现过程中自由运行 LSP、Ruff、Pyright 与 pytest 验证自己的代码。
+4. **发布（ADR-0001）**：push / tag / version bump / CHANGELOG 截版 /
+   真实发布命令由你执行，但**放行前置**是：
+   - 仓库内 QA 报告全绿（pre-push 会机械跑报告校验器）
+   - 看板状态为 `qa_passed`（pre-push 校验）
+   - **用户终验签字（user_signed）**——hook 无法机械判定，靠你自觉：
+     状态还停在 qa_passed 时，向用户请求终验，签字后才发布。
+
+   完整角色矩阵见 `docs/RUNBOOK.md` §4.5 与
+   `docs/architecture/ADR-0001-发布权与push管控.md`：qa 投否决票
+   （报告「未通过」= 你的 push 被机械拦死），arch 发通行证
+   （契约每条 AC 都得被报告覆盖），用户握方向盘（`user_signed`）。
 
 ## 硬性禁令
 - **严禁修改 `tests/**`**。测试是 QA 与 ARCH 的契约载体，不是你的调试工具。

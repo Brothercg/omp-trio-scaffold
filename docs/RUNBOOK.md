@@ -215,6 +215,46 @@ cp .omp/trio/templates/board.template.md docs/task/2026-10-25-登录改造/board
 
 ---
 
+## 4.5 发布与 push（ADR-0001）
+
+三色会话中：
+
+- **qa / arch**：`git push` / `git tag` 被 pre-push hook 机械拒绝。
+  人工推送逃生舱：`unset TRIO_ROLE`。
+- **dev**：push 需要两个前置 —— ① QA 报告全绿（hook 会重新跑
+  报告校验器）；② 看板状态 `qa_passed` / `user_signed`。
+  qa_passed 与 user_signed 之间的发布窗口，请 dev 向用户请求终验后再推。
+- 版本号（`pyproject.toml` / `setup.cfg` / `setup.py`）与 `CHANGELOG.md`
+  的写入权已从公共维护区收窄到 **dev 独占**；qa / arch 越写会被
+  pre-commit / trio-guard 拒绝。
+
+### 角色 × 发布链矩阵
+
+| 动作 | arch | dev | qa | 用户（无角色） | 拦截层 |
+|---|---|---|---|---|---|
+| `git push` / `git tag` | ❌ | ✅ 前置达标 | ❌ | ✅ | pre-push hook |
+| version bump / CHANGELOG 截版 | ❌ | ✅ 独占 | ❌ | ✅ | policy.txt → pre-commit / trio-guard |
+| `npm publish` 等真实发布 | 纪律禁令 | ✅ | 纪律禁令 | ✅ | rules.md 纪律（命令层，无 hook） |
+
+角色在发布链里各执一环：
+
+- **qa 的否决权**：dev 要 push，必须先有一份 qa 产出的全绿报告。
+  qa 报「未通过 / 半通过」，dev 的 push 被 hook 机械堵死——qa 不碰
+  发布动作，报告本身就是否决票。
+- **arch 的契约权**：报告全绿的前提是报告覆盖契约的每条 AC。契约矛盾
+  时流程停在 `contract-gap` 裁决，根本走不到发布。arch 对发布的约束
+  是间接但前置的。
+- **dev 的执行权**：唯一握有发布动作的角色，但被三重前置层层嵌套
+  （QA 报告全绿 → 看板 `qa_passed` → 用户签字 `user_signed`）。
+  权限集中与流程制衡并存。
+- **用户的终验权**：发布权的落点与逃生舱。qa_passed → user_signed
+  之间的抢跑争议由用户签字终结；`unset TRIO_ROLE` 后的人工推送不受
+  hook 管辖，是全链兜底。
+
+一句话记忆：**qa 投否决票，arch 发通行证，dev 踩油门，用户握方向盘**。
+
+---
+
 ## 5. 常见问题
 
 **`trio-start: 找不到角色简报`**

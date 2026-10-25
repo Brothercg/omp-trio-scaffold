@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+#
+# TRIO 发布门禁（pre-push）—— git push / tag 兜底拦截
+#
+# 与 templates/pre-commit 共用 TRIO_ROLE 角色身份体系。职责分工：
+#   - pre-commit：提交前复核暂存区文件写权（文件维度）
+#   - pre-push  ：推送前校验发布权（对外动作维度，ADR-0001）
+#
+# 发布权决策（ADR-0001）：
+#   1. qa / arch（含别名 pm）→ 一律拒绝 push
+#   2. dev → 必须同时满足：
+#        a. 仓库内存在 qa-*-report-*.md 且全部通过报告校验器
+#        b. 存在 docs/task/*/board.md 且「当前状态」为 qa_passed / user_signed
+#   3. 无 TRIO_ROLE → 放行（人工推送合法逃生舱，与 pre-commit 同语义）
+#
+# 本 hook 不做 user_signed 的机械判定 —— hook 无法感知用户签字；
+# dev 在 qa_passed 与 user_signed 之间的发布窗口由 dev.rules.md 纪律约束。
+#
+# 用法：作为 .git/hooks/pre-push 安装（由 bin/init-agent.sh 完成）。
+
+set -uo pipefail
+
+readonly REPORT_GLOB="docs/task/*/qa-*-report-*.md"
+readonly BOARD_GLOB="docs/task/*/board.md"
+readonly SELF="$(basename "$0")"
+
+log_error() { printf '%s: %s\n' "$SELF" "$*" >&2; }
+log_info() { printf '%s: %s\n' "$SELF" "$*"; }
+
+ROLE="${TRIO_ROLE:-}"
+if [[ -z "$ROLE" ]]; then
+	log_info "TRIO_ROLE 未设置 → 跳过发布校验（人工推送放行）"
+	exit 0
+fi
+case "${ROLE,,}" in
+	pm)
+		ROLE="arch"
+		log_info "TRIO_ROLE=pm 为兼容别名，按 arch 处理"
+		;;
+	arch | dev | qa) ROLE="${ROLE,,}" ;;
+	*)
+		log_error "TRIO_ROLE 取值非法：'${ROLE}'（应为 arch | dev | qa，兼容别名 pm）"
+		exit 1
+		;;
+esac
+
+PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+	log_error "不在 git 工作树中，跳过"
+	exit 0
+}
+cd "$PROJECT_ROOT" || exit 1
+
+if [[ "$ROLE" == "arch" || "$ROLE" == "qa" ]]; then
+	log_error "TRIO 发布门禁：arch / qa 无发布权（禁止 push / tag）"
+	log_error "决策来源：docs/architecture/ADR-0001-发布权与push管控.md"
+	log_error "若为人工推送，请 unset TRIO_ROLE 再次推送"
+	exit 1
+fi
+
+# ── ROLE == dev ────────────────────────────────────────────────────────────
+
+shopt -s nullglob
+report_files=(${REPORT_GLOB})
+shopt -u nullglob
+
+if [[ ${#report_files[@]} -eq 0 ]]; then
+	log_error "TRIO 发布门禁：dev 推送被拒 —— 未找到任何 QA 验收报告"
+	log_error "放行前置：QA 报告全绿 + 看板状态 qa_passed / user_signed"
+	log_error "决策来源：docs/architecture/ADR-0001-发布权与push管控.md"
+	exit 1
+fi
+
+if ! command -v bun >/dev/null 2>&1; then
+	log_error "TRIO 发布门禁：校验报告需 bun，PATH 中找不到 bun"
+	log_error "安装 bun，或改为人工推送（unset TRIO_ROLE）。"
+	exit 1
+fi
+
+VALIDATOR_REL="bin/trio-check-report.mjs"
+if [[ ! -f "$VALIDATOR_REL" ]]; then
+	log_error "TRIO 发布门禁：报告校验器缺失"
+	log_error "重新运行安装脚本部署校验器，或改为人工推送（unset TRIO_ROLE）。"
+	exit 1
+fi
+
+for report in "${report_files[@]}"; do
+	if ! bun "$VALIDATOR_REL" "$report" >/dev/null 2>&1; then
+		bun "$VALIDATOR_REL" "$report" 2>&1 | tail -20 >&2
+		log_error "TRIO 发布门禁：QA 报告未全绿 → 拒绝推送。不合规文件：${report}"
+		log_error "修复报告或等 QA 复测后重新推送。决策来源：ADR-0001"
+		exit 1
+	fi
+done
+
+newest_board="$(ls -t ${BOARD_GLOB} 2>/dev/null | head -1)"
+if [[ -z "$newest_board" ]]; then
+	log_error "TRIO 发布门禁：dev 推送被拒 —— 未找到任何任务看板"
+	exit 1
+fi
+board_state="$(awk '/当前状态/ {print $4; exit}' "$newest_board" 2>/dev/null | tr -d '[:space:]' || true)"
+board_state="${board_state//\`/}"
+if [[ "$board_state" != "qa_passed" && "$board_state" != "user_signed" ]]; then
+	log_error "TRIO 发布门禁：dev 推送被拒 —— 看板状态 '${board_state:-<空>}' 未过 qa_passed"
+	log_error "看板：${newest_board}"
+	log_error "此窗口内的发布仍按 DEV 规则纪律，须等待用户终验签字（user_signed）"
+	exit 1
+fi
+
+log_info "TRIO 发布门禁：dev 推送放行（QA 全绿 + 看板 ${board_state}）"
+log_info "提醒：qa_passed → user_signed 之间的发布仍按 DEV 规则纪律，需等用户终验签字"
+exit 0

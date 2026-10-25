@@ -1,3 +1,4 @@
 *.sh text eol=lf
 pre-commit text eol=lf
+pre-push text eol=lf
 *.ts text eol=lf

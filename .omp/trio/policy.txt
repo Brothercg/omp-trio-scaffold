@@ -36,15 +36,12 @@
 
 # 说明与版本
 allow * README.md
-allow * CHANGELOG.md
+allow * docs/RUNBOOK.md
 
 # 任务看板：每个任务文件夹一份，三方共写（无角色前缀，故显式放行）
 allow * docs/task/*/board.md
 
 # 依赖与打包
-allow * pyproject.toml
-allow * setup.cfg
-allow * setup.py
 allow * requirements*.txt
 allow * uv.lock
 allow * poetry.lock
@@ -80,6 +77,10 @@ deny arch tests/**
 # ─────────────────────────────────────────────────────────────────────────────
 allow dev docs/task/*/dev-*.md
 allow dev src/**
+allow dev pyproject.toml
+allow dev setup.cfg
+allow dev setup.py
+allow dev CHANGELOG.md
 
 # 硬红线：不得修改测试（测试是 QA 与 ARCH 的契约载体）
 deny dev tests/**

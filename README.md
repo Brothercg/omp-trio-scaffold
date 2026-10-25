@@ -4,7 +4,7 @@
 （Three Amigos：ARCH / 系统架构、DEV / 开发、QA / 对抗测试）协作理念，
 把「角色分工 + 契约先行 + 对抗验收」落到 omp 的实际运行机制上。
 
-> 当前版本：**v0.1.0**
+> 当前版本：**v0.2.0**
 
 ---
 
@@ -41,8 +41,9 @@ QA 发现缺陷必须产出**最小报错复现脚本** + 缺陷文档。
 - 越权写入 → hook 当场拒绝
 - 越权提交 → pre-commit 拒绝
 - 报告造假（SKIP 计入 PASS、总判定与逐条不一致）→ 校验器拒绝提交
+- 越权 push / tag → pre-push 拒绝（qa / arch 无发布权；dev 须 QA 全绿且看板达标）
 
-三条都有可执行的检查，不依赖「请大家自觉」。
+四条都有可执行的检查，不依赖「请大家自觉」。
 
 ---
 
@@ -68,7 +69,8 @@ omp-trio-scaffold/
 │   ├── report.template.md       验收报告（四值结论域）
 │   ├── bug.template.md          缺陷 / 契约缺口
 │   ├── verdict.template.md      ARCH 裁决记录
-│   └── pre-commit               提交门禁脚本
+│   ├── pre-commit               提交门禁脚本
+│   └── pre-push                 推送 / 发布门禁脚本（ADR-0001）
 ├── .omp/                        脚手架自身的运行时副本
 │   ├── trio/{arch,dev,test}.rules.md + policy.txt
 │   ├── hooks/pre/trio-guard.ts  进程内写门禁
@@ -76,9 +78,11 @@ omp-trio-scaffold/
 ├── tests/
 │   ├── trio-policy.test.mjs     门禁策略回归测试
 │   ├── trio-check-report.test.mjs  报告校验器回归测试
-│   └── trio-guard.test.mjs      hook 运行时集成测试（不依赖模型）
+│   ├── trio-guard.test.mjs      hook 运行时集成测试（不依赖模型）
+│   └── trio-pre-push.test.mjs   发布门禁回归测试（角色 / 报告 / 看板）
 ├── docs/
-│   └── RUNBOOK.md               运行手册：单终端 / 三终端 / tmux / 排错
+│   ├── RUNBOOK.md               运行手册：单终端 / 三终端 / tmux / 排错
+│   └── architecture/            跨任务 ADR（ARCH 独占）
 ├── README.md
 ├── .gitignore
 └── .gitattributes
@@ -97,7 +101,8 @@ omp-trio-scaffold/
 │   │   └── templates/                 任务产物模板
 │   ├── hooks/pre/trio-guard.ts        进程内写门禁
 │   └── extensions/trio-session-name.ts 会话名自动设为角色
-├── .git/hooks/pre-commit
+├── .git/hooks/pre-commit              提交门禁
+├── .git/hooks/pre-push                发布门禁（ADR-0001）
 ├── bin/trio-check-report.mjs          报告校验器
 ├── docs/
 │   ├── task/                          任务产物聚合层（一个任务一个文件夹）
@@ -337,16 +342,30 @@ deny  <role> <glob>       该角色禁止写入该路径
 | `docs/task/*/qa-*.md` | ❌ | ❌ | ✅ 写 |
 | `src/**` | ❌ | ✅ 写 | ❌ |
 | `tests/**` | ❌ | ❌ | ✅ 写 |
+| `CHANGELOG.md` / `pyproject.toml` / `setup.cfg` / `setup.py` | ❌ | ✅ 写 | ❌ |
 | `docs/task/*/board.md` | ✅ | ✅ | ✅ |
 | 公共维护区 | ✅ | ✅ | ✅ |
 
-公共维护区（三方均可写）：`README.md`、`CHANGELOG.md`、`pyproject.toml`、
-`setup.cfg`、`setup.py`、`requirements*.txt`、`uv.lock`、`poetry.lock`、
-`pytest.ini`、`.pytest.ini`、`ruff.toml`、`.ruff.toml`、`pyrightconfig.json`、
-`.gitignore`、`.gitattributes`、`.github/workflows/*`。
+公共维护区（三方均可写）：`README.md`、`docs/RUNBOOK.md`、`requirements*.txt`、
+`uv.lock`、`poetry.lock`、`pytest.ini`、`.pytest.ini`、`ruff.toml`、
+`.ruff.toml`、`pyrightconfig.json`、`.gitignore`、`.gitattributes`、
+`.github/workflows/*`。
+
+版本号与 `CHANGELOG.md` 属**发布链**，已收窄为 DEV 独占（ADR-0001）——
+qa / arch 越写会被 pre-commit / trio-guard 拒绝。
 
 门禁自身（`.omp/hooks/**`、`.omp/trio/policy.txt`、`.git/hooks/pre-commit`、
 `bin/**`）对任何角色都是 deny —— 否则被约束者可以自行解除限制。
+
+### 发布与 push
+
+发布权归 DEV 独占（`docs/architecture/ADR-0001-发布权与push管控.md`）：
+
+- **qa / arch**：`git push` / `git tag` 被 pre-push hook 机械拒绝；人工推送用 `unset TRIO_ROLE`。
+- **dev**：push 前置 = QA 报告全绿 + 看板 `qa_passed` / `user_signed`；`qa_passed` 后须等用户终验签字。
+- **未设置 `TRIO_ROLE`**：放行（人工逃生舱）。
+
+完整矩阵见 [`docs/RUNBOOK.md` §4.5](docs/RUNBOOK.md)。
 
 ### 为什么任务文件夹用文件名前缀而不是子目录
 
