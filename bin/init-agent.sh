@@ -151,7 +151,7 @@ done
 # ── 2. .omp/trio/ 角色简报与看板 ───────────────────────────────────────────
 
 printf '\n[2/5] 角色简报与看板\n'
-create_file "${TARGET_DIR}/.omp/trio/pm.rules.md" "${SCAFFOLD_ROOT}/profiles/pm.rules.md"
+create_file "${TARGET_DIR}/.omp/trio/arch.rules.md" "${SCAFFOLD_ROOT}/profiles/arch.rules.md"
 create_file "${TARGET_DIR}/.omp/trio/dev.rules.md" "${SCAFFOLD_ROOT}/profiles/dev.rules.md"
 create_file "${TARGET_DIR}/.omp/trio/test.rules.md" "${SCAFFOLD_ROOT}/profiles/test.rules.md"
 create_file "${TARGET_DIR}/.omp/trio/CURRENT_TASK.md" "${SCAFFOLD_ROOT}/templates/CURRENT_TASK.md"
@@ -178,7 +178,7 @@ create_file "${TARGET_DIR}/tests/trio-policy.test.mjs" "${SCAFFOLD_ROOT}/tests/t
 printf '\n完成：新建 %d 项，跳过 %d 项。\n' "$CREATED" "$SKIPPED"
 printf '\n下一步：\n'
 printf '  1. 在项目根目录开三个终端，分别执行：\n'
-printf '       %s/bin/start-agent.sh pm\n' "$SCAFFOLD_ROOT"
+printf '       %s/bin/start-agent.sh arch\n' "$SCAFFOLD_ROOT"
 printf '       %s/bin/start-agent.sh dev\n' "$SCAFFOLD_ROOT"
 printf '       %s/bin/start-agent.sh qa\n' "$SCAFFOLD_ROOT"
 printf '  2. 自测门禁是否生效：%s/bin/trio-selftest.sh %s\n' "$SCAFFOLD_ROOT" "$TARGET_DIR"

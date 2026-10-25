@@ -1,7 +1,7 @@
 # omp 三人行脚手架（Three Amigos for omp）
 
 面向终端多 Agent 隔离协作的脚手架体系。参考经典软件工程的**敏捷三人行**
-（Three Amigos：PM / 架构、Dev / 开发、QA / 对抗测试）协作理念，
+（Three Amigos：ARCH / 系统架构、DEV / 开发、QA / 对抗测试）协作理念，
 把「角色分工 + 契约先行 + 对抗验收」落到 omp 的实际运行机制上。
 
 ---
@@ -24,7 +24,8 @@
 
 ### 二、测试契约独立
 
-验收标准与测试由 PM 与 QA 闭环。开发**严禁**修改测试用例来掩盖 Bug；
+形式化契约（含接口签名与 Given-When-Then）由 ARCH 发布，测试由 QA 独立编写 ——
+二者不看同一份实现的脸色。开发**严禁**修改测试用例来掩盖 Bug；
 QA 发现缺陷必须产出**最小报错复现脚本** + 缺陷文档。
 
 这条约束不是靠提示词自觉，而是靠目录白名单硬隔离：
@@ -47,7 +48,7 @@ omp-trio-scaffold/
 │   ├── start-agent.sh        以指定角色启动 omp
 │   └── trio-selftest.sh      一键自测门禁是否生效
 ├── profiles/                 角色简报（出厂源）
-│   ├── pm.rules.md           PM：系统架构师与产品设计师
+│   ├── arch.rules.md         ARCH：系统架构师 / 技术仲裁者
 │   ├── dev.rules.md          DEV：高级软件开发工程师
 │   └── test.rules.md         QA：对抗性质检与边界测试专家
 ├── templates/                契约模板（出厂源）
@@ -58,10 +59,12 @@ omp-trio-scaffold/
 │   └── pre-commit            提交门禁脚本
 ├── .omp/                     脚手架自身的运行时副本
 │   ├── trio/
-│   │   ├── pm.rules.md / dev.rules.md / test.rules.md
+│   │   ├── arch.rules.md / dev.rules.md / test.rules.md
 │   │   ├── CURRENT_TASK.md   运行时看板实体
 │   │   └── policy.txt        写策略单一真值源
 │   └── hooks/pre/trio-guard.ts   进程内写门禁
+├── tests/
+│   └── trio-policy.test.mjs  门禁契约回归测试
 ├── README.md
 ├── .gitignore
 └── .gitattributes
@@ -78,8 +81,8 @@ omp-trio-scaffold/
 │   └── hooks/pre/trio-guard.ts
 ├── .git/hooks/pre-commit
 ├── docs/
-│   ├── specs/           PM 独占：验收契约
-│   ├── architecture/    PM 独占：架构决策
+│   ├── specs/           ARCH 独占：形式化契约（接口签名 + AC）
+│   ├── architecture/    ARCH 独占：ADR 与架构决策
 │   ├── releases/        DEV 独占：交付说明
 │   └── bugs/            QA 独占：缺陷文档
 ├── src/                 DEV 独占：业务实现
@@ -125,8 +128,8 @@ cd ~/projects/my-app
 ### 开三个终端
 
 ```bash
-# 终端 A —— PM
-bin/start-agent.sh pm
+# 终端 A —— ARCH（系统架构师）
+bin/start-agent.sh arch
 
 # 终端 B —— DEV
 bin/start-agent.sh dev
@@ -143,10 +146,10 @@ bin/start-agent.sh qa
 
 ```
 ┌─────────────┬──────────────────────────┬──────────────────────────┐
-│ 阶段         │ PM                       │ DEV / QA                 │
+│ 阶段         │ ARCH                     │ DEV / QA                 │
 ├─────────────┼──────────────────────────┼──────────────────────────┤
 │ 1 契约       │ 写 docs/specs/<id>.md    │ （等待，读契约）          │
-│             │ Given-When-Then + 边界   │                          │
+│             │ 接口签名 + AC + 极值      │                          │
 ├─────────────┼──────────────────────────┼──────────────────────────┤
 │ 2 实现       │ 更新看板 → spec_agreed   │ DEV 读契约 → 写 src/     │
 │             │                          │ QA 读契约 → 写 tests/    │
@@ -161,14 +164,14 @@ bin/start-agent.sh qa
 │ 5 修复       │ 更新看板 → testing       │ DEV 读缺陷文档 → 修 src/ │
 │             │                          │ （不碰 tests/）           │
 ├─────────────┼──────────────────────────┼──────────────────────────┤
-│ 6 验收       │ 勾选 AC                  │ QA 复测 → 全绿 → done    │
+│ 6 验收       │ 契约升版（若需）          │ QA 复测 → 全绿 → done    │
 └─────────────┴──────────────────────────┴──────────────────────────┘
 ```
 
 三条铁律在时序中体现为：
 
-- PM 写完契约前，DEV/QA 只能读、不能猜。
-- DEV 遇到测试失败时改 `src/`，**不改** `tests/`；契约本身有问题时写进交付说明交 PM 裁决。
+- ARCH 写完契约前，DEV/QA 只能读、不能猜。
+- DEV 遇到测试失败时改 `src/`，**不改** `tests/`；契约本身有问题时写进交付说明交 ARCH 裁决。
 - QA 发现缺陷时**只报告不修复** —— 越权改 `src/` 会污染缺陷真相。
 
 ---
@@ -182,13 +185,15 @@ allow <role> <glob>       该角色允许写入该路径
 deny  <role> <glob>       该角色禁止写入该路径
 ```
 
-- `<role>`：`pm` / `dev` / `qa` / `*`（所有角色）
+- `<role>`：`arch` / `dev` / `qa` / `*`（所有角色）
+- 别名：`pm` 是 `arch` 的历史名称，hook 与 pre-commit 在匹配前自动归一化。
+  旧策略文件里的 `allow pm ...` 仍然生效，无需迁移。
 - 判定：**deny 优先**；deny 未命中但 allow 命中则允许；两者都没命中则**拒绝**（fail-closed）
 - 路径相对于项目根目录；`*` 匹配任意字符（含 `/`）
 
 ### 角色矩阵
 
-| 路径 | PM | DEV | QA |
+| 路径 | ARCH | DEV | QA |
 |---|:---:|:---:|:---:|
 | `docs/specs/**` | ✅ 写 | ❌ | ❌ |
 | `docs/architecture/**` | ✅ 写 | ❌ | ❌ |

@@ -35,23 +35,16 @@ const hookModule = await import(
 		).toString("base64")
 );
 
-const { decide, bashTargetsForbidden, extractPathsFromPatchInput, extractPathsFromCode, inputPaths } = hookModule;
+const {
+	decide,
+	parsePolicy,
+	bashTargetsForbidden,
+	extractPathsFromPatchInput,
+	extractPathsFromCode,
+	inputPaths,
+} = hookModule;
 
-// ── 策略解析（与 pre-commit 侧语义一致）────────────────────────────────────
-
-function parsePolicy(text) {
-	const rules = [];
-	for (const raw of text.split("\n")) {
-		const line = raw.trim();
-		if (!line || line.startsWith("#")) continue;
-		const parts = line.split(/\s+/);
-		if (parts.length !== 3) continue;
-		if (parts[0] !== "allow" && parts[0] !== "deny") continue;
-		rules.push({ allow: parts[0] === "allow", role: parts[1], glob: parts[2] });
-	}
-	return rules;
-}
-
+// 直接复用 hook 的解析器 —— 测试与生产代码不存在镜像实现，不会漂移。
 const rules = parsePolicy(fs.readFileSync(POLICY_PATH, "utf8"));
 
 // ── 断言helper ─────────────────────────────────────────────────────────────
@@ -101,10 +94,12 @@ check("DEV 禁写 docs/specs/", () => assertDenied("dev", "docs/specs/TASK-1.md"
 check("DEV 禁写 docs/architecture/", () => assertDenied("dev", "docs/architecture/x.md"));
 check("DEV 禁写 docs/bugs/", () => assertDenied("dev", "docs/bugs/BUG-1.md"));
 
-check("PM 可写 docs/specs/", () => assertAllowed("pm", "docs/specs/TASK-1.md"));
-check("PM 可写 docs/architecture/", () => assertAllowed("pm", "docs/architecture/x.md"));
-check("PM 禁写 src/", () => assertDenied("pm", "src/a.py"));
-check("PM 禁写 tests/", () => assertDenied("pm", "tests/a.py"));
+check("ARCH 可写 docs/specs/", () => assertAllowed("arch", "docs/specs/TASK-1.md"));
+check("ARCH 可写 docs/architecture/", () => assertAllowed("arch", "docs/architecture/x.md"));
+check("ARCH 禁写 src/（硬红线）", () => assertDenied("arch", "src/a.py"));
+check("ARCH 禁写 tests/（硬红线）", () => assertDenied("arch", "tests/a.py"));
+check("ARCH 禁写 docs/releases/", () => assertDenied("arch", "docs/releases/TASK-1.md"));
+check("ARCH 禁写 docs/bugs/", () => assertDenied("arch", "docs/bugs/BUG-1.md"));
 
 check("QA 可写 tests/", () => assertAllowed("qa", "tests/test_a.py"));
 check("QA 可写 docs/bugs/", () => assertAllowed("qa", "docs/bugs/BUG-1.md"));
@@ -137,7 +132,7 @@ const COMMON = [
 ];
 for (const file of COMMON) {
 	check(`三方均可写 ${file}`, () => {
-		assertAllowed("pm", file);
+		assertAllowed("arch", file);
 		assertAllowed("dev", file);
 		assertAllowed("qa", file);
 	});
@@ -149,7 +144,7 @@ console.log("\n[门禁自身保护]");
 
 for (const file of [".omp/hooks/pre/trio-guard.ts", ".omp/trio/policy.txt", "bin/init-agent.sh"]) {
 	check(`任何角色都不得写 ${file}`, () => {
-		assertDenied("pm", file);
+		assertDenied("arch", file);
 		assertDenied("dev", file);
 		assertDenied("qa", file);
 	});
@@ -162,7 +157,7 @@ console.log("\n[fail-closed]");
 check("白名单外的路径一律拒绝", () => {
 	assertDenied("dev", "unknown/file.txt");
 	assertDenied("dev", "docs/other/x.md");
-	assertDenied("pm", "docs/releases/x.md");
+	assertDenied("arch", "docs/releases/x.md");
 	assertDenied("qa", "docs/releases/x.md");
 });
 
@@ -265,12 +260,42 @@ check("lsp 写动作视为写", () => {
 	]);
 });
 
-// ── 7. 角色简报文件名映射（start-agent.sh 与 init-agent.sh 必须一致）─────
+// ── 7. 角色别名兼容（pm → arch）──────────────────────────────────────────
+
+console.log("\n[角色别名兼容]");
+
+check("TRIO_ROLE=pm 与 arch 判定等价（docs/specs/ 可写）", () => {
+	assert.deepEqual(decide(rules, "pm", "docs/specs/T.md"), decide(rules, "arch", "docs/specs/T.md"));
+	assertAllowed("pm", "docs/specs/T.md");
+});
+
+check("TRIO_ROLE=pm 仍受 src/ 硬红线约束", () => assertDenied("pm", "src/a.py"));
+check("TRIO_ROLE=pm 仍受 tests/ 硬红线约束", () => assertDenied("pm", "tests/a.py"));
+
+check("别名大小写不敏感（PM / Pm）", () => {
+	assertAllowed("PM", "docs/architecture/x.md");
+	assertAllowed("Pm", "docs/architecture/x.md");
+});
+
+check("未知角色按 fail-closed 拒绝", () => assertDenied("intern", "README.md"));
+
+check("旧版 policy.txt 的 allow pm 行对新角色 arch 生效", () => {
+	const legacy = parsePolicy("allow pm docs/specs/**\ndeny * src/**\n");
+	assert.equal(decide(legacy, "arch", "docs/specs/T.md").allowed, true);
+	assert.equal(decide(legacy, "arch", "src/a.py").allowed, false);
+});
+
+check("旧版 policy.txt 的 deny pm 行对新角色 arch 生效", () => {
+	const legacy = parsePolicy("allow * docs/**\ndeny pm docs/secret.md\n");
+	assert.equal(decide(legacy, "arch", "docs/secret.md").allowed, false);
+});
+
+// ── 8. 角色简报文件名映射（start-agent.sh 与 init-agent.sh 必须一致）─────
 
 console.log("\n[角色简报映射]");
 
 const SCAFFOLD_PROFILES = path.join(SCAFFOLD_ROOT, "profiles");
-const EXPECTED_BRIEFS = { pm: "pm.rules.md", dev: "dev.rules.md", qa: "test.rules.md" };
+const EXPECTED_BRIEFS = { arch: "arch.rules.md", dev: "dev.rules.md", qa: "test.rules.md" };
 
 for (const [role, brief] of Object.entries(EXPECTED_BRIEFS)) {
 	check(`${role} 的简报文件存在：profiles/${brief}`, () => {
@@ -284,14 +309,28 @@ for (const [role, brief] of Object.entries(EXPECTED_BRIEFS)) {
 	});
 }
 
+check("start-agent.sh 使用 arch → arch.rules.md 映射", () => {
+	const script = fs.readFileSync(path.join(SCAFFOLD_ROOT, "bin", "start-agent.sh"), "utf8");
+	assert.match(script, /arch\)\s*ROLE_BRIEF="arch"/, "start-agent.sh 缺少 arch → arch 的映射");
+});
+
 check("start-agent.sh 使用 qa → test.rules.md 映射", () => {
 	const script = fs.readFileSync(path.join(SCAFFOLD_ROOT, "bin", "start-agent.sh"), "utf8");
 	assert.match(script, /qa\)\s*ROLE_BRIEF="test"/, "start-agent.sh 缺少 qa → test 的映射");
 });
 
+check("init-agent.sh 部署 arch.rules.md 到 .omp/trio/", () => {
+	const script = fs.readFileSync(path.join(SCAFFOLD_ROOT, "bin", "init-agent.sh"), "utf8");
+	assert.match(script, /\.omp\/trio\/arch\.rules\.md/, "init-agent.sh 未部署 arch.rules.md");
+});
+
 check("init-agent.sh 部署 test.rules.md 到 .omp/trio/", () => {
 	const script = fs.readFileSync(path.join(SCAFFOLD_ROOT, "bin", "init-agent.sh"), "utf8");
 	assert.match(script, /\.omp\/trio\/test\.rules\.md/, "init-agent.sh 未部署 test.rules.md");
+});
+
+check("已不存在 profiles/pm.rules.md（旧角色已改名）", () => {
+	assert.ok(!fs.existsSync(path.join(SCAFFOLD_PROFILES, "pm.rules.md")), "profiles/pm.rules.md 仍存在");
 });
 
 // ── 汇总 ───────────────────────────────────────────────────────────────────

@@ -7,7 +7,8 @@
 #   - hook      ：实时拦截，阻止越权写入落盘
 #   - pre-commit：提交前复核暂存区，防止绕过 hook 的路径（如手工 git add）
 #
-# 角色身份来自环境变量 TRIO_ROLE（pm / dev / qa）。
+# 角色身份来自环境变量 TRIO_ROLE（arch / dev / qa）。
+# 别名：'pm' 是 'arch' 的兼容别名，收到后自动归一化（旧环境变量不必改）。
 # 未设置 TRIO_ROLE 时放行 —— 人工提交是合法逃生舱，本 hook 只做角色维度的校验。
 #
 # 用法：作为 .git/hooks/pre-commit 安装（由 bin/init-agent.sh 完成）。
@@ -28,10 +29,15 @@ if [[ -z "$ROLE" ]]; then
 	log_info "TRIO_ROLE 未设置 → 跳过角色校验（人工提交放行）"
 	exit 0
 fi
-case "$ROLE" in
-	pm | dev | qa) ;;
+# 归一化：兼容旧别名 pm → arch。
+case "${ROLE,,}" in
+	pm)
+		ROLE="arch"
+		log_info "TRIO_ROLE=pm 为兼容别名，按 arch 处理"
+		;;
+	arch | dev | qa) ROLE="${ROLE,,}" ;;
 	*)
-		log_error "TRIO_ROLE 取值非法：'${ROLE}'（应为 pm | dev | qa）"
+		log_error "TRIO_ROLE 取值非法：'${ROLE}'（应为 arch | dev | qa，兼容别名 pm）"
 		exit 1
 		;;
 esac
@@ -64,8 +70,12 @@ fi
 #   allow <role> <glob> / deny <role> <glob>
 #   判定顺序：任一 deny 命中 → 拒绝；否则任一 allow 命中 → 允许；否则拒绝。
 
-mapfile -t ALLOW_RULES < <(awk -v r="$ROLE" '$1=="allow" && ($2==r || $2=="*") {print $3}' "$POLICY_FILE")
-mapfile -t DENY_RULES < <(awk -v r="$ROLE" '$1=="deny" && ($2==r || $2=="*") {print $3}' "$POLICY_FILE")
+# 角色匹配含别名：旧版 policy.txt 中写的是 `pm`，而 ROLE 已归一化为 arch。
+# `(r=="arch" && $2=="pm")` 让未迁移的旧策略文件继续生效。
+ROLE_MATCH='$2==r || $2=="*" || (r=="arch" && $2=="pm")'
+
+mapfile -t ALLOW_RULES < <(awk -v r="$ROLE" "\$1==\"allow\" && ($ROLE_MATCH) {print \$3}" "$POLICY_FILE")
+mapfile -t DENY_RULES < <(awk -v r="$ROLE" "\$1==\"deny\" && ($ROLE_MATCH) {print \$3}" "$POLICY_FILE")
 
 # glob → 正则：'*' 匹配任意字符（含 '/'），'**' 等价于 '*'。
 # 路径 glob 的 '*' 跨目录分隔符，与 hook 侧 matchGlob 的语义一致。

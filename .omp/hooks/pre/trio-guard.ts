@@ -1,7 +1,8 @@
 /**
  * TRIO 写门禁 —— 进程内写前拦截 (in-process write guard)
  *
- * 角色身份来自环境变量 TRIO_ROLE（pm / dev / qa），由 bin/start-agent.sh 导出。
+ * 角色身份来自环境变量 TRIO_ROLE（arch / dev / qa），由 bin/start-agent.sh 导出。
+ * 别名：'pm' 是 'arch' 的兼容别名，收到后自动归一化为 'arch'。
  * 未设置 TRIO_ROLE 时本 hook 不做任何拦截（人工介入是合法逃生舱）。
  *
  * 策略来自 .omp/trio/policy.txt —— 与 .git/hooks/pre-commit 共用同一份真值源。
@@ -21,10 +22,33 @@ import type { HookAPI } from "@oh-my-pi/pi-coding-agent/extensibility/hooks";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-type Role = "pm" | "dev" | "qa";
+type Role = "arch" | "dev" | "qa";
 type Verdict = { allowed: true } | { allowed: false; reason: string };
 
-const ROLES: readonly Role[] = ["pm", "dev", "qa"];
+const ROLES: readonly Role[] = ["arch", "dev", "qa"];
+
+/**
+ * 兼容别名：'pm' 是 'arch' 的历史名称。
+ * 旧项目已配置的 TRIO_ROLE=pm 与旧版 policy.txt（内含 `allow pm`）
+ * 都经由本表归一化，无需迁移脚本。
+ */
+const ROLE_ALIASES: Readonly<Record<string, Role>> = { pm: "arch" };
+
+/** 拦截提示中的角色称谓。 */
+const ROLE_LABEL: Readonly<Record<Role, string>> = {
+	arch: "[ARCH / 架构师]",
+	dev: "[DEV / 开发]",
+	qa: "[QA / 测试]",
+};
+
+/** 把外部输入的角色串归一化为内部角色；非法或缺失返回 null。 */
+function normalizeRole(value: string | undefined): Role | null {
+	if (!value) return null;
+	const lowered = value.toLowerCase();
+	const aliased = ROLE_ALIASES[lowered];
+	if (aliased) return aliased;
+	return ROLES.includes(lowered as Role) ? (lowered as Role) : null;
+}
 
 interface Rule {
 	allow: boolean;
@@ -38,7 +62,7 @@ const POLICY_RELATIVE_PATH = path.join(".omp", "trio", "policy.txt");
 // 策略解析
 // ─────────────────────────────────────────────────────────────────────────────
 
-function parsePolicy(text: string): Rule[] {
+export function parsePolicy(text: string): Rule[] {
 	const rules: Rule[] = [];
 	for (const rawLine of text.split("\n")) {
 		const line = rawLine.trim();
@@ -47,8 +71,16 @@ function parsePolicy(text: string): Rule[] {
 		if (parts.length !== 3) continue;
 		const [kind, role, glob] = parts;
 		if (kind !== "allow" && kind !== "deny") continue;
-		if (role !== "*" && !ROLES.includes(role as Role)) continue;
-		rules.push({ allow: kind === "allow", role: role as Role | "*", glob });
+		let normalizedRole: Role | "*";
+		if (role === "*") {
+			normalizedRole = "*";
+		} else {
+			// 旧版 policy.txt 里写的是 `allow pm ...`，在此归一化为 arch。
+			const resolved = normalizeRole(role);
+			if (resolved === null) continue;
+			normalizedRole = resolved;
+		}
+		rules.push({ allow: kind === "allow", role: normalizedRole, glob });
 	}
 	return rules;
 }
@@ -73,7 +105,12 @@ function matchGlob(glob: string, relativePath: string): boolean {
 /**
  * deny 优先的白名单判定。未命中任何 allow → 拒绝（fail-closed）。
  */
-export function decide(rules: readonly Rule[], role: Role, relativePath: string): Verdict {
+export function decide(rules: readonly Rule[], roleInput: string, relativePath: string): Verdict {
+	// 别名在此归一化，因此 `decide(rules, "pm", path)` 与 `"arch"` 等价。
+	const role = normalizeRole(roleInput);
+	if (role === null) {
+		return { allowed: false, reason: `未知角色 "${roleInput}"，按 fail-closed 拒绝写入 "${relativePath}"` };
+	}
 	const applicable = rules.filter(rule => rule.role === "*" || rule.role === role);
 	const denied = applicable.find(rule => !rule.allow && matchGlob(rule.glob, relativePath));
 	if (denied) {
@@ -83,7 +120,7 @@ export function decide(rules: readonly Rule[], role: Role, relativePath: string)
 	if (allowed) {
 		return { allowed: true };
 	}
-	return { allowed: false, reason: `路径 "${relativePath}" 不在 ${role} 的写入白名单内` };
+	return { allowed: false, reason: `路径 "${relativePath}" 不在 ${ROLE_LABEL[role]} 的写入白名单内` };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -280,8 +317,9 @@ export default function (pi: HookAPI) {
 	}
 
 	pi.on("tool_call", async (event, ctx) => {
-		const role = process.env.TRIO_ROLE as Role | undefined;
-		if (!role || !ROLES.includes(role)) return undefined;
+		// TRIO_ROLE=pm 是 arch 的兼容别名，归一化后统一按 arch 判定。
+		const role = normalizeRole(process.env.TRIO_ROLE);
+		if (role === null) return undefined;
 
 		const root = projectRoot(ctx);
 		const rules = loadRules(root);
@@ -302,7 +340,7 @@ export default function (pi: HookAPI) {
 			return {
 				block: true,
 				reason:
-					`TRIO 门禁：${role} 不得写入 ${hits.join(", ")}。\n` +
+					`TRIO 门禁：${ROLE_LABEL[role]} 不得写入 ${hits.join(", ")}。\n` +
 					`命令：${command}\n` +
 					`若这是误判（例如只是读取该目录），请改用不触达写意图的形式。`,
 			};
@@ -323,7 +361,7 @@ export default function (pi: HookAPI) {
 		return {
 			block: true,
 			reason:
-				`TRIO 门禁：${role} 的越权写入已被拦截。\n` +
+				`TRIO 门禁：${ROLE_LABEL[role]} 的越权写入已被拦截。\n` +
 				`${violations.join("\n")}\n` +
 				`策略来源：${POLICY_RELATIVE_PATH}`,
 		};

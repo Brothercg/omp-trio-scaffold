@@ -21,7 +21,9 @@
 #   3. 否则任一 allow 命中   → 允许。
 #   4. 否则                  → 拒绝（fail-closed）。
 #
-#   角色取值：pm / dev / qa。
+#   角色取值：arch / dev / qa。
+#   别名：pm → arch。hook 与 pre-commit 在匹配前会做归一化，
+#         因此本文件只写 arch，无需重复写 pm 规则。
 #   未设置 TRIO_ROLE 的会话不执行本策略（见 hook 与 pre-commit 的说明）。
 #
 # ── 作用域 ────────────────────────────────────────────────────────────────
@@ -58,12 +60,12 @@ allow * .gitattributes
 allow * .github/workflows/*
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PM：系统架构师与产品设计师
+# ARCH：系统架构师 / 技术仲裁者（别名 pm，由消费方归一化）
 # ─────────────────────────────────────────────────────────────────────────────
-allow pm docs/specs/**
-allow pm docs/architecture/**
-deny  pm src/**
-deny  pm tests/**
+allow arch docs/specs/**
+allow arch docs/architecture/**
+deny  arch src/**
+deny  arch tests/**
 
 # ─────────────────────────────────────────────────────────────────────────────
 # DEV：高级软件开发工程师
