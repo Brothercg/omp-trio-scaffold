@@ -173,8 +173,9 @@ bin/start-agent.sh dev       # 开发
 bin/start-agent.sh qa        # 对抗测试
 ```
 
-一个终端一个角色。`start-agent.sh` 在**当前终端前台**启动 `omp`（`exec` 替换当前 shell，
-不新开窗口、不后台化），它会：
+一个终端一个角色。`start-agent.sh` 在**当前终端前台**启动 `omp`——`exec` 替换的是
+脚本自身进程，退出 omp（`/quit` 或 `/exit`）后回到同一个终端的提示符，可直接换角色。
+不新开窗口、不后台化。它会：
 
 1. 导出 `TRIO_ROLE` —— 门禁的身份来源（hook 与 pre-commit 共用）
 2. 用 `--append-system-prompt` 注入对应角色简报

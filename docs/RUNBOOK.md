@@ -60,33 +60,43 @@ trio-tmux --model claude-sonnet-5
 
 ---
 
-## 2. 方式 A：三个终端（不依赖 tmux）
+## 2. 方式 A：单终端，一次一个角色
 
-最通用，SSH、VS Code 终端、裸 tty 都一样。
+最通用，SSH、VS Code 终端、裸 tty 都一样。**一个终端对应一个 omp 进程**，
+`TRIO_ROLE` 只作用于该进程。
+
+### 只跑一个角色（不并行）
 
 ```bash
 cd ~/projects/my-app
-
-# 终端 1
 trio-start arch
+```
 
-# 终端 2
+退出 omp 用 `/quit`（等价 `/q`）或 `/exit`，会回到**同一个终端**的提示符，
+接着就能起下一个角色：
+
+```bash
 trio-start dev
-
-# 终端 3
 trio-start qa
 ```
 
+> `trio-start` 内部的 `exec omp` 替换的是**脚本自身**的进程，不是你的交互 shell。
+> 所以退出 omp 后终端不会关闭，提示符还在，无需重开窗口。
+
+### 三个角色并行
+
+开三个终端，各自 `cd` 到同一项目目录，各跑一个角色：
+
+| 终端 1 | 终端 2 | 终端 3 |
+|---|---|---|
+| `trio-start arch` | `trio-start dev` | `trio-start qa` |
+
 要点：
 
-- **一个终端一个角色**。`trio-start` 以 `exec` 启动 omp，当前 shell 进程会被替换。
 - 三个终端必须 `cd` 到**同一个项目目录** —— 它们共享同一 git 工作树。
 - 隔离靠写策略白名单，不靠目录隔离；三个 agent 互相能看到文件变化，但改不了对方的目录。
-
-不想开三个终端时，用 omp 的后台能力不合适：`TRIO_ROLE` 是进程环境变量，
-同一 shell 里的多个 omp 会互相覆盖身份。**必须分进程**。
-
----
+- 不要在同一个 shell 里后台并行跑多个 omp：`TRIO_ROLE` 是进程环境变量，
+  会互相覆盖身份。**必须分进程**。
 
 ### 会话名自动同步为角色
 
