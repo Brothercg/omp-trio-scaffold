@@ -47,6 +47,7 @@ omp-trio-scaffold/
 ├── bin/
 │   ├── init-agent.sh            把脚手架注入目标项目
 │   ├── start-agent.sh           以指定角色启动 omp
+│   ├── trio-install.sh          把三个入口软链到本机 PATH
 │   ├── trio-check-report.mjs    验收报告机械校验器
 │   └── trio-selftest.sh         一键自测门禁是否生效
 ├── profiles/                    角色简报（出厂源）
@@ -66,7 +67,8 @@ omp-trio-scaffold/
 │   └── hooks/pre/trio-guard.ts  进程内写门禁
 ├── tests/
 │   ├── trio-policy.test.mjs     门禁策略回归测试
-│   └── trio-check-report.test.mjs  报告校验器回归测试
+│   ├── trio-check-report.test.mjs  报告校验器回归测试
+│   └── trio-guard.test.mjs      hook 运行时集成测试（不依赖模型）
 ├── README.md
 ├── .gitignore
 └── .gitattributes
@@ -97,6 +99,39 @@ omp-trio-scaffold/
 ├── src/                               DEV 独占：业务实现
 └── tests/                             QA 独占：测试与复现脚本
 ```
+
+---
+
+## 发布到本机（可选）
+
+不想每次敲长路径，可以把三个入口软链到 PATH 目录：
+
+```bash
+bin/trio-install.sh                 # 默认装到 ~/.local/bin
+bin/trio-install.sh --prefix DIR    # 自定义目录
+bin/trio-install.sh --check         # 只检查当前状态，不修改
+bin/trio-install.sh --uninstall     # 删除软链
+```
+
+发布的是**软链**而非副本，所以仓库更新后无需重新发布：
+
+| 命令 | 实际执行 |
+|---|---|
+| `trio-init` | `bin/init-agent.sh` |
+| `trio-start` | `bin/start-agent.sh` |
+| `trio-selftest` | `bin/trio-selftest.sh` |
+
+之后在任意目录：
+
+```bash
+cd ~/projects/some-app
+trio-init                 # 注入脚手架
+trio-selftest --fast      # 确认门禁生效
+trio-start arch           # 开第一个角色
+```
+
+> 脚本用 `readlink -f` 解析自身真实路径，软链调用不会把仓库根算到软链所在目录的上级。
+> `trio-selftest` 第 1 段有一条回归检查专门守住这个性质。
 
 ---
 
@@ -359,6 +394,41 @@ git add tests/ && git commit -m probe                 # 期望放行
 bun tests/trio-policy.test.mjs        # 门禁策略契约
 bun tests/trio-check-report.test.mjs  # 报告校验器契约
 ```
+
+---
+
+## 自举：能用本项目治理本项目吗
+
+**只能部分自举，不能三方齐上。** 写策略是按「业务项目」形状设计的（`src/` + `tests/` + `docs/task/`），
+而本仓库的「实现」是 `bin/`、`templates/`、`profiles/`、`.omp/trio/` —— 恰好都在保护区内。
+
+在本仓库内以角色身份启动时，实测可写矩阵：
+
+| 路径 | arch | dev | qa |
+|---|:---:|:---:|:---:|
+| `docs/task/*/arch-*.md`、`docs/architecture/**` | ✓ | ✗ | ✗ |
+| `docs/task/*/dev-*.md`、`src/**` | ✗ | ✓ | ✗ |
+| `docs/task/*/qa-*.md`、`tests/**` | ✗ | ✗ | ✓ |
+| `README.md`、`CHANGELOG.md`、`docs/task/*/board.md` | ✓ | ✓ | ✓ |
+| `templates/**`、`profiles/**`、`.omp/trio/*.rules.md` | ✗ | ✗ | ✗ |
+| `bin/**`、`.omp/hooks/**`、`.omp/trio/policy.txt` | ✗ | ✗ | ✗ |
+
+原因是结构性的：**本仓库的实现就是门禁组件本身**。允许任一角色改写 `policy.txt`、
+`trio-guard.ts` 或 `trio-check-report.mjs`，等于让它自行解锁；放宽这一条就等于放弃
+「机械门禁优先于纪律」这条设计前提。此外本仓库没有 `src/`，DEV 的实现通道在这里是空的。
+
+**推荐姿势**：
+
+| 层 | 谁来做 | 工具 |
+|---|---|---|
+| 本仓库的 `bin/`、`templates/`、`profiles/` | 人类（角色之外） | `trio-selftest` 当验收 |
+| 本仓库的设计与 ADR | ARCH 会话 | `docs/task/*/arch-*.md` |
+| 本仓库的回归测试 | QA 会话 | `tests/trio-*.test.mjs` |
+| 被治理的业务项目 | 三角色齐上 | 全套门禁 |
+
+它的价值在**被治理的项目**上，而不在治理自己。硬要自举也可以给本仓库单独加一份
+meta 策略，但必须继续锁死 `policy.txt`、hook、报告校验器与 `bin/init-agent.sh`，
+剩下的可写面只有 `templates/`、`profiles/`、`bin/start-agent.sh` —— 收益不抵复杂度。
 
 ---
 

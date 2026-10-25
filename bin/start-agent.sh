@@ -25,7 +25,10 @@
 
 set -euo pipefail
 
-readonly SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# 解析软链后的真实路径：本脚本可被 symlink 到 ~/.local/bin 等 PATH 目录。
+# 直接用 dirname $BASH_SOURCE 会把 SCAFFOLD_ROOT 算成软链所在目录的上级。
+readonly SELF_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+readonly SELF_DIR="$(dirname "$SELF_PATH")"
 readonly SCAFFOLD_ROOT="$(cd "${SELF_DIR}/.." && pwd)"
 
 # ── 参数解析 ───────────────────────────────────────────────────────────────

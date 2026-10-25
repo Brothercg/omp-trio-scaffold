@@ -19,7 +19,10 @@
 
 set -euo pipefail
 
-readonly SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# 解析软链后的真实路径：本脚本可被 symlink 到 ~/.local/bin 等 PATH 目录。
+# 直接用 dirname $BASH_SOURCE 会把 SCAFFOLD_ROOT 算成软链所在目录的上级。
+readonly SELF_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+readonly SELF_DIR="$(dirname "$SELF_PATH")"
 readonly SCAFFOLD_ROOT="$(cd "${SELF_DIR}/.." && pwd)"
 
 # ── 参数解析 ───────────────────────────────────────────────────────────────
@@ -188,10 +191,19 @@ create_file "${TARGET_DIR}/tests/trio-guard.test.mjs" \
 
 # ── 汇总 ───────────────────────────────────────────────────────────────────
 
+# 通过 trio-install.sh 发布的软链调用时，提示短命令；直接调用则给绝对路径。
+if [[ -L "${BASH_SOURCE[0]}" ]]; then
+	START_HINT="trio-start"
+	TEST_HINT="trio-selftest"
+else
+	START_HINT="${SCAFFOLD_ROOT}/bin/start-agent.sh"
+	TEST_HINT="${SCAFFOLD_ROOT}/bin/trio-selftest.sh"
+fi
+
 printf '\n完成：新建 %d 项，跳过 %d 项。\n' "$CREATED" "$SKIPPED"
 printf '\n下一步：\n'
 printf '  1. 在项目根目录开三个终端，分别执行：\n'
-printf '       %s/bin/start-agent.sh arch\n' "$SCAFFOLD_ROOT"
-printf '       %s/bin/start-agent.sh dev\n' "$SCAFFOLD_ROOT"
-printf '       %s/bin/start-agent.sh qa\n' "$SCAFFOLD_ROOT"
-printf '  2. 自测门禁是否生效：%s/bin/trio-selftest.sh %s\n' "$SCAFFOLD_ROOT" "$TARGET_DIR"
+printf '       %s arch\n' "$START_HINT"
+printf '       %s dev\n' "$START_HINT"
+printf '       %s qa\n' "$START_HINT"
+printf '  2. 自测门禁是否生效：%s %s\n' "$TEST_HINT" "$TARGET_DIR"

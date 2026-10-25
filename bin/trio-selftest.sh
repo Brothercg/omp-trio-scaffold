@@ -16,7 +16,10 @@
 
 set -uo pipefail
 
-readonly SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# 解析软链后的真实路径：本脚本可被 symlink 到 ~/.local/bin 等 PATH 目录。
+# 直接用 dirname $BASH_SOURCE 会把 SCAFFOLD_ROOT 算成软链所在目录的上级。
+readonly SELF_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+readonly SELF_DIR="$(dirname "$SELF_PATH")"
 readonly SCAFFOLD_ROOT="$(cd "${SELF_DIR}/.." && pwd)"
 
 PROJECT_DIR=""
@@ -134,6 +137,21 @@ if [[ "$missing" -eq 1 ]]; then
 	red "  安装不完整，后续测试无意义。先运行：${SCAFFOLD_ROOT}/bin/init-agent.sh ${PROJECT_DIR}"
 	exit 1
 fi
+
+# 软链发布自检。历史缺陷：用 dirname $BASH_SOURCE 推导根目录，
+# 脚本被 symlink 到 ~/.local/bin 后 SCAFFOLD_ROOT 会算成 ~/.local，
+# 表现为「脚手架不完整」。trio-install.sh --check 只读，可安全用作探针。
+LINK_PROBE="$(mktemp -d)"
+ln -sfn "${SCAFFOLD_ROOT}/bin/trio-install.sh" "${LINK_PROBE}/trio-install"
+LINK_OUT="$("${LINK_PROBE}/trio-install" --check --prefix "${LINK_PROBE}/bin" 2>&1 || true)"
+if printf '%s' "$LINK_OUT" | grep -q '脚手架不完整'; then
+	red "  ✗ 软链发布失效：通过 symlink 调用时 SCAFFOLD_ROOT 解析错误"
+	FAIL=$((FAIL + 1))
+else
+	green "  ✓ 软链发布可用（symlink 调用时根目录解析正确）"
+	PASS=$((PASS + 1))
+fi
+rm -rf "$LINK_PROBE"
 
 # ── 1. 预置测试夹具 ───────────────────────────────────────────────────────
 
