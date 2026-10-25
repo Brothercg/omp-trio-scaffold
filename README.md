@@ -4,6 +4,8 @@
 （Three Amigos：ARCH / 系统架构、DEV / 开发、QA / 对抗测试）协作理念，
 把「角色分工 + 契约先行 + 对抗验收」落到 omp 的实际运行机制上。
 
+> 当前版本：**v0.1.0**
+
 ---
 
 ## 设计哲学
@@ -21,6 +23,10 @@
 | 提交兜底 | `.git/hooks/pre-commit` | 提交前复核暂存区，堵住绕过 hook 的路径 |
 
 两层共用同一份策略真值源：`.omp/trio/policy.txt`。
+
+**hook 是权威闸门**：越权文件在写之前就被拒，落不了盘。
+pre-commit 是第二道，防的是「hook 漏判」与「人类误提交」——它依赖
+`TRIO_ROLE` 环境变量，而环境变量可被调用方剥离（见「已知边界」）。
 
 ### 二、契约独立于实现
 
@@ -48,7 +54,7 @@ omp-trio-scaffold/
 │   ├── init-agent.sh            把脚手架注入目标项目
 │   ├── start-agent.sh           以指定角色启动 omp
 │   ├── trio-install.sh          把四个入口软链到本机 PATH
-│   ├── trio-tmux.sh             用 tmux 一次开三个角色窗口
+│   ├── trio-tmux.sh             把终端分成三块，各跑一个角色
 │   ├── trio-check-report.mjs    验收报告机械校验器
 │   └── trio-selftest.sh         一键自测门禁是否生效
 ├── profiles/                    角色简报（出厂源）
@@ -72,7 +78,7 @@ omp-trio-scaffold/
 │   ├── trio-check-report.test.mjs  报告校验器回归测试
 │   └── trio-guard.test.mjs      hook 运行时集成测试（不依赖模型）
 ├── docs/
-│   └── RUNBOOK.md               运行手册：三终端 / tmux / 模型 / 排错
+│   └── RUNBOOK.md               运行手册：单终端 / 三终端 / tmux / 排错
 ├── README.md
 ├── .gitignore
 └── .gitattributes
@@ -89,7 +95,8 @@ omp-trio-scaffold/
 │   │   ├── {arch,dev,test}.rules.md   角色简报
 │   │   ├── policy.txt                 写策略真值源
 │   │   └── templates/                 任务产物模板
-│   └── hooks/pre/trio-guard.ts
+│   ├── hooks/pre/trio-guard.ts        进程内写门禁
+│   └── extensions/trio-session-name.ts 会话名自动设为角色
 ├── .git/hooks/pre-commit
 ├── bin/trio-check-report.mjs          报告校验器
 ├── docs/
@@ -108,7 +115,7 @@ omp-trio-scaffold/
 
 ## 发布到本机（可选）
 
-不想每次敲长路径，可以把三个入口软链到 PATH 目录：
+不想每次敲长路径，可以把四个入口软链到 PATH 目录：
 
 ```bash
 bin/trio-install.sh                 # 默认装到 ~/.local/bin
@@ -160,25 +167,30 @@ bin/init-agent.sh /path/to/your-project
 
 **完整运行手册见 [`docs/RUNBOOK.md`](docs/RUNBOOK.md)**（含 tmux 按键、常见问题）。两种方式：
 
-### 方式 A：三个终端
+### 方式 A：单终端，一次一个角色
+
+最常用。开一个终端，跑一条命令就是一个角色：
 
 ```bash
 cd ~/projects/my-app
-
-# 终端 1
 bin/start-agent.sh arch      # 系统架构师
-# 终端 2
+```
+
+退出 omp（`/quit` 或 `/exit`）后回到**同一个终端**的提示符，接着起下一个：
+
+```bash
 bin/start-agent.sh dev       # 开发
-# 终端 3
 bin/start-agent.sh qa        # 对抗测试
 ```
 
-一个终端一个角色。`start-agent.sh` 在**当前终端前台**启动 `omp`——`exec` 替换的是
-脚本自身进程，退出 omp（`/quit` 或 `/exit`）后回到同一个终端的提示符，可直接换角色。
-不新开窗口、不后台化。它会：
+要三个角色同时在线，就开三个终端，各自 `cd` 到同一项目目录跑一条。
+
+`start-agent.sh` 在**当前终端前台**启动 `omp`——`exec` 替换的是脚本自身进程，
+不是你的交互 shell，所以退出后终端不会关闭。不新开窗口、不后台化。它会：
 
 1. 导出 `TRIO_ROLE` —— 门禁的身份来源（hook 与 pre-commit 共用）
 2. 用 `--append-system-prompt` 注入对应角色简报
+3. 以 `--model` 指定默认模型（见下节）
 
 ### 方式 B：tmux 单窗口三分屏
 
@@ -213,9 +225,9 @@ pane 默认 `remain-on-exit failed`：omp 异常退出时保留 pane 以便读�
 |---|---|
 | `trio-start arch` | `deepseek/deepseek-v4.1-flash`（默认） |
 | `TRIO_MODEL=claude-opus-5 trio-start arch` | `claude-opus-5` |
-| `trio-tmux` | 三个窗口都是默认 |
-| `trio-tmux --model claude-sonnet-5` | 三个窗口都是 `claude-sonnet-5` |
-| 会话内 `/model` | 仅当前窗口临时切换 |
+| `trio-tmux` | 三个 pane 都是默认 |
+| `trio-tmux --model claude-sonnet-5` | 三个 pane 都是 `claude-sonnet-5` |
+| 会话内 `/model` | 仅当前会话临时切换 |
 
 默认值定义在 `bin/start-agent.sh` 的 `TRIO_DEFAULT_MODEL` 一处，改它即可换出厂默认。
 
@@ -421,9 +433,9 @@ bin/trio-selftest.sh /path/to/your-project
 
 | 阶段 | 验证内容 |
 |---|---|
-| 1/8 | 安装完整性：hook、策略、校验器、pre-commit、模板 |
+| 1/8 | 安装完整性：hook、策略、校验器、会话名扩展、pre-commit、模板、软链解析 |
 | 2/8 | 准备测试夹具 |
-| 3/8 | 策略契约 + 报告契约的单元测试 |
+| 3/8 | 三套单元测试：策略契约、报告契约、hook 运行时 |
 | 4/8 | pre-commit 角色门禁：越权拒绝、合规放行、无角色放行 |
 | 5/8 | pre-commit 报告硬门禁：不合规报告被拒 |
 | 6/8 | **真实 omp**：write/edit/bash 三通道 |
@@ -455,8 +467,9 @@ git add tests/ && git commit -m probe                 # 期望放行
 ### 单元测试
 
 ```bash
-bun tests/trio-policy.test.mjs        # 门禁策略契约
-bun tests/trio-check-report.test.mjs  # 报告校验器契约
+bun tests/trio-policy.test.mjs        # 门禁策略契约（111 项）
+bun tests/trio-check-report.test.mjs  # 报告校验器契约（34 项）
+bun tests/trio-guard.test.mjs         # hook 运行时集成，不依赖模型（38 项）
 ```
 
 ---
@@ -509,3 +522,10 @@ meta 策略，但必须继续锁死 `policy.txt`、hook、报告校验器与 `bi
   门禁管不到内容语义。
 - **`tests/trio-*.test.mjs` 归 QA 所有**：QA 可以修改门禁契约测试本身。
   pre-commit 只能保证 DEV 不改 `tests/`。
+- **pre-commit 的兜底可被剥离环境变量绕过**：agent 在 bash 里执行
+  `env -u TRIO_ROLE git commit` 时，git 进程拿不到角色，pre-commit 按「人工提交」放行。
+  所以真正的第一道闸是 hook——越权文件根本写不进去，也就无从提交。
+- **会话名由扩展写入，且只在无标题时生效**：`.omp/extensions/trio-session-name.ts`
+  缺失时不会报错，只是会话名保持 omp 默认；你 `/rename` 过的会话不会被改回角色名。
+- **tmux pane 标题是展示层**：边框上的 `ARCH`/`DEV`/`QA` 不影响门禁，
+  真正决定权限的只有 `TRIO_ROLE`。
