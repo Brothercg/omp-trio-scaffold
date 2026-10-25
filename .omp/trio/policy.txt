@@ -97,10 +97,28 @@ allow qa tests/**
 deny qa src/**
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 门禁自身的保护：任何角色都不得改写门禁逻辑或策略
+# 门禁自身的保护：策略真值源与权威关卡绝对禁改
 # （否则被约束者可以自行解除限制）
 # ─────────────────────────────────────────────────────────────────────────────
-deny * .omp/hooks/**
 deny * .omp/trio/policy.txt
 deny * .git/hooks/pre-commit
-deny * bin/**
+
+# 门禁派生执行件（guard / 模板 hook / 自检脚本）：维护窗口内对 DEV 开放
+# 单文件写权；其余角色、其余路径一律拒绝（deny 优先 + fail-closed）。
+deny arch .omp/hooks/**
+deny qa .omp/hooks/**
+deny arch bin/**
+deny qa bin/**
+
+# ── BEGIN TASK-002 临时写通道（arch-20261026-0536-verdict-2.md / ADR-0003）──
+# 回收条件：TASK-002 看板推进到 user_signed 后，用户 MUST 整段删除
+# BEGIN/END 之间内容，并把上方四条角色级 deny 恢复为：
+#   deny * .omp/hooks/**
+#   deny * bin/**
+# 回收动作记入看板决策记录；QA 按 spec AC-12 核验。
+allow dev .omp/hooks/pre/trio-guard.ts
+allow dev templates/pre-push
+allow dev templates/board.template.md
+allow dev bin/trio-selftest.sh
+allow dev bin/init-agent.sh
+# ── END TASK-002 临时写通道 ────────────────────────────────────────────
