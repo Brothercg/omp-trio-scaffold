@@ -5,8 +5,9 @@
 # 三个窗口（arch / dev / qa）共享同一项目目录与同一 git 工作树；
 # 隔离由写策略白名单保证，不靠目录隔离。
 #
-# 窗口初始化时**不设置任何模型**：每个窗口以 omp 默认模型启动，
-# 进入后自行用 `/model`（或 /switch）切换。需要预先指定时可显式用 --model。
+# 模型由 start-agent.sh 决定：默认 deepseek/deepseek-v4.1-flash。
+# 本脚本默认不带 --model，并清掉父 shell 残留的 TRIO_MODEL；
+# 需要给三个窗口统一换模型时用 --model。
 #
 # 用法:
 #   bin/trio-tmux.sh [--project <目录>] [--session <名字>] [--model <标识>]
@@ -14,7 +15,7 @@
 #
 #   --project <目录>   项目根目录，默认当前目录（必须已 trio-init）
 #   --session <名字>   tmux 会话名，默认 trio-<项目目录名>
-#   --model <标识>     显式给三个窗口指定同一模型（默认不指定，用 omp 默认）
+#   --model <标识>     给三个窗口统一换模型（默认用 start-agent 的默认模型）
 #   --no-attach        只创建会话，不自动接入
 #   --force            会话已存在时先 kill 重建
 #   --no-remain        窗口退出后立即关闭（默认在失败时保留窗口以便看报错）
@@ -42,7 +43,7 @@ usage() {
 
   --project <目录>   项目根目录，默认当前目录（必须已 trio-init）
   --session <名字>   tmux 会话名，默认 trio-<项目目录名>
-  --model <标识>     显式给三个窗口指定同一模型；默认不指定，用 omp 默认
+  --model <标识>     给三个窗口统一换模型；默认用 start-agent 的默认模型
   --no-attach        只创建会话，不自动接入
   --force            会话已存在时先 kill 重建
   --no-remain        窗口退出后立即关闭（默认在失败时保留窗口）
@@ -154,8 +155,8 @@ if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
 fi
 
 # ── 组装每个窗口的命令 ─────────────────────────────────────────────────────
-# env -u TRIO_MODEL：清掉父 shell 可能残留的值，保证「窗口启动时不指定模型」。
-# 需要模型时用 --model，或进入会话后 /model 切换。
+# 默认用 env -u TRIO_MODEL 清掉父 shell 残留值，让三个窗口都用 start-agent 的
+# 默认模型；给了 --model 就转成 TRIO_MODEL 传给 start-agent，走同一条路径。
 
 shell_quote() {
 	printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
@@ -164,9 +165,10 @@ shell_quote() {
 window_command() {
 	local role="$1"
 	local cmd
-	cmd="env -u TRIO_MODEL $(shell_quote "$START_AGENT") $role --project $(shell_quote "$PROJECT_DIR")"
 	if [[ -n "$MODEL" ]]; then
-		cmd+=" -- --model $(shell_quote "$MODEL")"
+		cmd="TRIO_MODEL=$(shell_quote "$MODEL") $(shell_quote "$START_AGENT") $role --project $(shell_quote "$PROJECT_DIR")"
+	else
+		cmd="env -u TRIO_MODEL $(shell_quote "$START_AGENT") $role --project $(shell_quote "$PROJECT_DIR")"
 	fi
 	printf '%s' "$cmd"
 }
@@ -193,9 +195,9 @@ tmux select-window -t "$SESSION_NAME:arch"
 printf '已创建 tmux 会话：%s\n' "$SESSION_NAME"
 printf '  窗口：arch / dev / qa（共享 %s）\n' "$PROJECT_DIR"
 if [[ -n "$MODEL" ]]; then
-	printf '  模型：%s（三个窗口一致）\n' "$MODEL"
+	printf '  模型：%s（三个窗口一致，TRIO_MODEL 覆盖）\n' "$MODEL"
 else
-	printf '  模型：omp 默认（进入会话后用 /model 切换）\n'
+	printf '  模型：start-agent 默认（见各窗口启动横幅；进入后 /model 可切换）\n'
 fi
 printf '  切换：Ctrl-b 然后 w 列窗口 / 数字键直选\n'
 

@@ -12,11 +12,12 @@
 #   2. 用 --append-system-prompt 注入对应角色简报
 #      （不用 --system-prompt：那会整块替换默认提示，丢掉工具策略与工具清单，
 #        与「能力全开」相悖）
-#   3. 若设置 TRIO_MODEL，则以 --model <值> 启动；否则用 omp 当前默认模型
+#   3. 以 --model <模型> 启动。默认三个角色都用 deepseek/deepseek-v4.1-flash；
+#      TRIO_MODEL 可覆盖。进入会话后仍可用 /model 临时切换。
 #
 # 环境变量：
 #   TRIO_ROLE   角色标识（由本脚本设置，一般无需手动指定）
-#   TRIO_MODEL  可选。指定模型，如 `opus`、`gpt-5.2`；不设则用 omp 默认
+#   TRIO_MODEL  可选。覆盖默认模型，如 `opus`、`claude-sonnet-5`
 #
 # 示例:
 #   bin/start-agent.sh dev
@@ -30,6 +31,13 @@ set -euo pipefail
 readonly SELF_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 readonly SELF_DIR="$(dirname "$SELF_PATH")"
 readonly SCAFFOLD_ROOT="$(cd "${SELF_DIR}/.." && pwd)"
+
+# ── 默认模型 ───────────────────────────────────────────────────────────────
+# 三个角色共用这一默认值；TRIO_MODEL 可覆盖，会话内 /model 可再切换。
+#
+# 必须带 `deepseek/` 这一段：裸写 `deepseek-v4.1-flash` 会精确命中
+# opencode-go provider 的同名模型，而本默认值指向 commandcode 下的那条。
+readonly TRIO_DEFAULT_MODEL="deepseek/deepseek-v4.1-flash"
 
 # ── 参数解析 ───────────────────────────────────────────────────────────────
 
@@ -48,7 +56,7 @@ usage() {
   -h, --help             显示本帮助
 
 环境变量:
-  TRIO_MODEL   可选模型标识（如 opus、gpt-5.2）。不设则用 omp 当前默认模型。
+  TRIO_MODEL   可选，覆盖默认模型。默认 deepseek/deepseek-v4.1-flash。
 
 示例:
   bin/start-agent.sh arch
@@ -159,11 +167,9 @@ fi
 
 # ── 组装命令 ───────────────────────────────────────────────────────────────
 
-CMD=(omp --cwd "$PROJECT_DIR" --append-system-prompt "$ROLE_PROMPT")
+EFFECTIVE_MODEL="${TRIO_MODEL:-$TRIO_DEFAULT_MODEL}"
 
-if [[ -n "${TRIO_MODEL:-}" ]]; then
-	CMD+=(--model "$TRIO_MODEL")
-fi
+CMD=(omp --cwd "$PROJECT_DIR" --append-system-prompt "$ROLE_PROMPT" --model "$EFFECTIVE_MODEL")
 
 if [[ ${#PASSTHROUGH[@]} -gt 0 ]]; then
 	CMD+=("${PASSTHROUGH[@]}")
@@ -176,7 +182,11 @@ export TRIO_ROLE="$ROLE"
 printf 'TRIO 角色 %s\n' "$ROLE"
 printf '  项目目录：%s\n' "$PROJECT_DIR"
 printf '  角色简报：%s\n' "$ROLE_PROMPT"
-printf '  模型    ：%s\n' "${TRIO_MODEL:-（omp 默认）}"
+if [[ -n "${TRIO_MODEL:-}" ]]; then
+	printf '  模型    ：%s（TRIO_MODEL 覆盖）\n' "$EFFECTIVE_MODEL"
+else
+	printf '  模型    ：%s（默认）\n' "$EFFECTIVE_MODEL"
+fi
 printf '  执行    ：%s\n\n' "${CMD[*]}"
 
 exec "${CMD[@]}"

@@ -190,20 +190,28 @@ bin/trio-tmux.sh --force               # 会话已存在时重建
 三个窗口 `arch` / `dev` / `qa` 共享同一项目目录与同一 git 工作树。
 窗口默认 `remain-on-exit failed`：omp 异常退出时保留窗口以便读错误。
 
-### 模型：默认不指定
+### 模型：默认 `deepseek/deepseek-v4.1-flash`
 
-脚手架**默认不传 `--model`**，三个窗口都以 omp 默认模型启动；进入后随时用
-`/model`（或 `/switch`、`Ctrl+P`）切换。模型是运行时决策，不写进启动命令。
+三个角色默认都跑 `deepseek/deepseek-v4.1-flash`（commandcode provider）。
+`start-agent.sh` 始终以 `--model <模型>` 启动，`TRIO_MODEL` 可覆盖：
 
-需要预先指定时才显式传参：
+| 操作 | 三个角色实际使用的模型 |
+|---|---|
+| `trio-start arch` | `deepseek/deepseek-v4.1-flash`（默认） |
+| `TRIO_MODEL=claude-opus-5 trio-start arch` | `claude-opus-5` |
+| `trio-tmux` | 三个窗口都是默认 |
+| `trio-tmux --model claude-sonnet-5` | 三个窗口都是 `claude-sonnet-5` |
+| 会话内 `/model` | 仅当前窗口临时切换 |
+
+默认值定义在 `bin/start-agent.sh` 的 `TRIO_DEFAULT_MODEL` 一处，改它即可换出厂默认。
+
+> 默认值必须保留 `deepseek/` 这段前缀：裸写 `deepseek-v4.1-flash` 会精确命中
+> opencode-go provider 下的同名模型，而不是这里要用的 commandcode 那条。
 
 ```bash
-TRIO_MODEL=claude-opus-5 trio-start arch      # 单终端
-bin/trio-tmux.sh --model claude-sonnet-5      # 三窗口同一模型
+omp models                      # 列出所有可用模型
+omp models find deepseek        # 按关键词搜索
 ```
-
-`trio-tmux.sh` 会清掉父 shell 里残留的 `TRIO_MODEL`，避免意外污染三个窗口。
-查看可选模型：`omp models` / `omp models find opus`。
 
 > **别名**：`pm` 是 `arch` 的历史名称，`bin/start-agent.sh pm` 仍可用，
 > 会打印一行提示后按 `arch` 启动。`TRIO_ROLE=pm` 同理。

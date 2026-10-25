@@ -15,12 +15,36 @@ trio-selftest --fast     # 在项目根执行，确认门禁已装好
 
 ---
 
-## 1. 模型：默认不指定，启动后再设
+## 1. 模型：默认 `deepseek/deepseek-v4.1-flash`
 
-**脚手架默认不传 `--model`**，三个窗口都以 omp 自己的默认模型启动。
-这是刻意设计：模型选择是可变的运行时决策，不该写进启动脚本或窗口初始化命令。
+三个角色默认都跑 `deepseek/deepseek-v4.1-flash`（commandcode provider），
+由 `start-agent.sh` 的 `TRIO_DEFAULT_MODEL` 常量决定，启动时以 `--model` 传入。
 
-进入会话后随时切换：
+| 操作 | 生效范围 |
+|---|---|
+| 什么都不设 | 三个角色都用默认模型 |
+| `TRIO_MODEL=<标识>` + `trio-start <角色>` | 该终端 |
+| `trio-tmux --model <标识>` | 三个窗口 |
+| 会话内 `/model` | 仅当前窗口，临时 |
+
+手动启动时改模型：
+
+```bash
+# 单个终端换模型
+TRIO_MODEL=claude-opus-5 trio-start arch
+
+# tmux 三窗口统一换模型
+trio-tmux --model claude-sonnet-5
+
+# 改出厂默认（影响所有项目）
+# 编辑 bin/start-agent.sh 的 TRIO_DEFAULT_MODEL
+```
+
+> 默认值必须保留 `deepseek/` 前缀。裸写 `deepseek-v4.1-flash` 会**精确命中**
+> opencode-go provider 下的同名模型（max-out 384K），而不是 commandcode 那条
+> （max-out 66K）。两者都能用，但计费与额度池不同。
+
+会话内切换：
 
 | 操作 | 说明 |
 |---|---|
@@ -29,21 +53,10 @@ trio-selftest --fast     # 在项目根执行，确认门禁已装好
 | `/effort` | 调整思考强度（与模型相关） |
 | `Ctrl+P` | 在 `--models` 指定的候选集里循环 |
 
-想看有哪些模型：`omp models`，或 `omp models find opus`。
+查看可用模型：`omp models`，或 `omp models find deepseek`。
 
-需要**预先**指定（例如脚本化批跑）时才显式传参：
-
-```bash
-# 三个角色同一模型
-trio-tmux --model claude-sonnet-5
-
-# 单个终端手动启动时
-TRIO_MODEL=claude-opus-5 trio-start arch
-```
-
-> `trio-tmux` 会在窗口命令里加 `env -u TRIO_MODEL`，清掉父 shell 的残留值。
-> 所以你在别处 `export TRIO_MODEL=...` 不会意外污染这三个窗口；
-> 要指定就用 `--model`，或进会话后 `/model`。
+> `trio-tmux` 默认在窗口命令里加 `env -u TRIO_MODEL`，清掉父 shell 的残留值，
+> 保证三个窗口都落到默认模型；给了 `--model` 才转成 `TRIO_MODEL` 传下去。
 
 ---
 
@@ -101,7 +114,7 @@ tmux attach -t trio-my-app
 |---|---|
 | `--project <目录>` | 项目根，默认当前目录 |
 | `--session <名字>` | 会话名，默认 `trio-<目录名>` |
-| `--model <标识>` | 显式给三个窗口指定同一模型；**默认不指定** |
+| `--model <标识>` | 给三个窗口统一换模型；默认用 `start-agent.sh` 的默认模型 |
 | `--no-attach` | 只创建会话，不自动接入（适合脚本） |
 | `--force` | 会话已存在时先 kill 重建 |
 | `--no-remain` | 窗口退出后立即关闭（默认失败时保留窗口，便于看报错） |
