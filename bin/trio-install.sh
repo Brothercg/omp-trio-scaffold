@@ -5,6 +5,7 @@
 # 发布的是软链（symlink），不是副本：
 #   trio-init       -> <scaffold>/bin/init-agent.sh
 #   trio-start      -> <scaffold>/bin/start-agent.sh
+#   trio-tmux       -> <scaffold>/bin/trio-tmux.sh
 #   trio-selftest   -> <scaffold>/bin/trio-selftest.sh
 #
 # 因此仓库更新后无需重新发布；但若整个仓库被移动/删除，软链会失效
@@ -46,6 +47,7 @@ usage() {
   trio-init                    在当前目录注入脚手架
   trio-init ~/projects/app     注入到指定项目
   trio-start dev               以 DEV 角色启动 omp
+  trio-tmux                    用 tmux 一次开三个角色窗口
   trio-selftest --fast         只跑不依赖模型的检查
 EOF
 }
@@ -92,6 +94,7 @@ for required in \
 	"bin/init-agent.sh" \
 	"bin/start-agent.sh" \
 	"bin/trio-selftest.sh" \
+	"bin/trio-tmux.sh" \
 	"bin/trio-check-report.mjs" \
 	"templates/pre-commit" \
 	".omp/trio/policy.txt" \
@@ -110,6 +113,7 @@ done
 readonly LINKS=(
 	"trio-init:bin/init-agent.sh"
 	"trio-start:bin/start-agent.sh"
+	"trio-tmux:bin/trio-tmux.sh"
 	"trio-selftest:bin/trio-selftest.sh"
 )
 
@@ -216,4 +220,5 @@ fi
 printf '\n下一步：\n'
 printf '  cd <你的项目> && trio-init\n'
 printf '  trio-selftest --fast\n'
-printf '  trio-start arch\n'
+printf '  trio-start arch        # 或在 tmux 里一次开三个\n'
+printf '  trio-tmux              # tmux 三窗口（arch/dev/qa）\n'

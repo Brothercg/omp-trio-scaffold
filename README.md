@@ -47,7 +47,8 @@ omp-trio-scaffold/
 ├── bin/
 │   ├── init-agent.sh            把脚手架注入目标项目
 │   ├── start-agent.sh           以指定角色启动 omp
-│   ├── trio-install.sh          把三个入口软链到本机 PATH
+│   ├── trio-install.sh          把四个入口软链到本机 PATH
+│   ├── trio-tmux.sh             用 tmux 一次开三个角色窗口
 │   ├── trio-check-report.mjs    验收报告机械校验器
 │   └── trio-selftest.sh         一键自测门禁是否生效
 ├── profiles/                    角色简报（出厂源）
@@ -69,6 +70,8 @@ omp-trio-scaffold/
 │   ├── trio-policy.test.mjs     门禁策略回归测试
 │   ├── trio-check-report.test.mjs  报告校验器回归测试
 │   └── trio-guard.test.mjs      hook 运行时集成测试（不依赖模型）
+├── docs/
+│   └── RUNBOOK.md               运行手册：三终端 / tmux / 模型 / 排错
 ├── README.md
 ├── .gitignore
 └── .gitattributes
@@ -119,6 +122,7 @@ bin/trio-install.sh --uninstall     # 删除软链
 |---|---|
 | `trio-init` | `bin/init-agent.sh` |
 | `trio-start` | `bin/start-agent.sh` |
+| `trio-tmux` | `bin/trio-tmux.sh` |
 | `trio-selftest` | `bin/trio-selftest.sh` |
 
 之后在任意目录：
@@ -153,15 +157,53 @@ bin/init-agent.sh /path/to/your-project
 
 ## 启动三角色
 
+**完整运行手册见 [`docs/RUNBOOK.md`](docs/RUNBOOK.md)**（含 tmux 按键、常见问题）。两种方式：
+
+### 方式 A：三个终端
+
 ```bash
+cd ~/projects/my-app
+
+# 终端 1
 bin/start-agent.sh arch      # 系统架构师
+# 终端 2
 bin/start-agent.sh dev       # 开发
+# 终端 3
 bin/start-agent.sh qa        # 对抗测试
 ```
 
-`start-agent.sh` 在当前终端直接启动 `omp`（不新开窗口），它会：
+一个终端一个角色。`start-agent.sh` 在**当前终端前台**启动 `omp`（`exec` 替换当前 shell，
+不新开窗口、不后台化），它会：
+
 1. 导出 `TRIO_ROLE` —— 门禁的身份来源（hook 与 pre-commit 共用）
 2. 用 `--append-system-prompt` 注入对应角色简报
+
+### 方式 B：tmux 三窗口
+
+```bash
+bin/trio-tmux.sh                       # 默认在当前目录建 trio-<目录名> 会话
+bin/trio-tmux.sh --project ~/projects/my-app --session trio-app
+bin/trio-tmux.sh --no-attach           # 只建会话，稍后 tmux attach
+bin/trio-tmux.sh --force               # 会话已存在时重建
+```
+
+三个窗口 `arch` / `dev` / `qa` 共享同一项目目录与同一 git 工作树。
+窗口默认 `remain-on-exit failed`：omp 异常退出时保留窗口以便读错误。
+
+### 模型：默认不指定
+
+脚手架**默认不传 `--model`**，三个窗口都以 omp 默认模型启动；进入后随时用
+`/model`（或 `/switch`、`Ctrl+P`）切换。模型是运行时决策，不写进启动命令。
+
+需要预先指定时才显式传参：
+
+```bash
+TRIO_MODEL=claude-opus-5 trio-start arch      # 单终端
+bin/trio-tmux.sh --model claude-sonnet-5      # 三窗口同一模型
+```
+
+`trio-tmux.sh` 会清掉父 shell 里残留的 `TRIO_MODEL`，避免意外污染三个窗口。
+查看可选模型：`omp models` / `omp models find opus`。
 
 > **别名**：`pm` 是 `arch` 的历史名称，`bin/start-agent.sh pm` 仍可用，
 > 会打印一行提示后按 `arch` 启动。`TRIO_ROLE=pm` 同理。
