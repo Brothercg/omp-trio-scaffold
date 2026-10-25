@@ -1,24 +1,22 @@
 #!/usr/bin/env bash
 #
-# trio-tmux.sh —— 用 tmux 一次拉起三个角色窗口
+# trio-tmux.sh —— 把当前终端分成三块，每块跑一个 TRIO 角色
 #
-# 三个窗口（arch / dev / qa）共享同一项目目录与同一 git 工作树；
-# 隔离由写策略白名单保证，不靠目录隔离。
+# 一个 window、三个 pane（不是三个 window）：
+#   rows（上中下）：ARCH / DEV / QA 依次堆叠
+#   cols（左中右）：ARCH / DEV / QA 依次并排
+#
+# 若你不想用 tmux，等价做法是开三个终端，各自执行 `trio-start <角色>`
+#  —— 那才是 trio 的原子模型（一个终端 = 一个角色），本脚本只是把
+#  「开三个终端」这一步自动化成一个分屏。
 #
 # 模型由 start-agent.sh 决定：默认 deepseek/deepseek-v4.1-flash。
 # 本脚本默认不带 --model，并清掉父 shell 残留的 TRIO_MODEL；
-# 需要给三个窗口统一换模型时用 --model。
+# 需要给三个 pane 统一换模型时用 --model。
 #
 # 用法:
-#   bin/trio-tmux.sh [--project <目录>] [--session <名字>] [--model <标识>]
-#                    [--no-attach] [--force]
-#
-#   --project <目录>   项目根目录，默认当前目录（必须已 trio-init）
-#   --session <名字>   tmux 会话名，默认 trio-<项目目录名>
-#   --model <标识>     给三个窗口统一换模型（默认用 start-agent 的默认模型）
-#   --no-attach        只创建会话，不自动接入
-#   --force            会话已存在时先 kill 重建
-#   --no-remain        窗口退出后立即关闭（默认在失败时保留窗口以便看报错）
+#   bin/trio-tmux.sh [--layout rows|cols] [--project <目录>] [--session <名字>]
+#                    [--model <标识>] [--no-attach] [--force] [--no-remain]
 #
 # 退出码：0 正常；1 环境不满足；2 参数错误。
 
@@ -29,8 +27,13 @@ readonly SELF_DIR="$(dirname "$SELF_PATH")"
 readonly SCAFFOLD_ROOT="$(cd "${SELF_DIR}/.." && pwd)"
 readonly START_AGENT="${SCAFFOLD_ROOT}/bin/start-agent.sh"
 
+# 创建顺序即展示顺序：arch → dev → qa。
+readonly ROLES=(arch dev qa)
+readonly ROLE_TITLES=(ARCH DEV QA)
+
 PROJECT_DIR="$PWD"
 SESSION_NAME=""
+LAYOUT="cols"
 MODEL=""
 ATTACH=1
 FORCE=0
@@ -38,26 +41,38 @@ REMAIN_ON_FAIL=1
 
 usage() {
 	cat <<'EOF'
-用法: trio-tmux.sh [--project <目录>] [--session <名字>] [--model <标识>]
-                   [--no-attach] [--force] [--no-remain]
+用法: trio-tmux.sh [--layout rows|cols] [--project <目录>] [--session <名字>]
+                   [--model <标识>] [--no-attach] [--force] [--no-remain]
 
+  --layout rows|cols 分屏方向，默认 cols
+                       rows = 上中下（竖屏/高窄终端）
+                       cols = 左中右（横屏/宽扁终端）
   --project <目录>   项目根目录，默认当前目录（必须已 trio-init）
   --session <名字>   tmux 会话名，默认 trio-<项目目录名>
-  --model <标识>     给三个窗口统一换模型；默认用 start-agent 的默认模型
+  --model <标识>     给三个 pane 统一换模型；默认用 start-agent 的默认模型
   --no-attach        只创建会话，不自动接入
   --force            会话已存在时先 kill 重建
-  --no-remain        窗口退出后立即关闭（默认在失败时保留窗口）
+  --no-remain        pane 退出后立即关闭（默认在失败时保留 pane）
   -h, --help         显示本帮助
 
 示例:
-  cd ~/projects/my-app && trio-tmux
-  trio-tmux --project ~/projects/my-app --session trio-app
+  cd ~/projects/my-app && trio-tmux              # 左中右（横屏）
+  trio-tmux --layout rows                        # 上中下（竖屏）
+  trio-tmux --project ~/projects/app --session trio-app
   trio-tmux --no-attach && tmux attach -t trio-my-app
 EOF
 }
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
+		--layout)
+			[[ $# -ge 2 ]] || {
+				printf 'trio-tmux.sh: --layout 需要 rows 或 cols\n' >&2
+				exit 2
+			}
+			LAYOUT="$2"
+			shift 2
+			;;
 		--project)
 			[[ $# -ge 2 ]] || {
 				printf 'trio-tmux.sh: --project 需要一个目录参数\n' >&2
@@ -106,6 +121,14 @@ while [[ $# -gt 0 ]]; do
 	esac
 done
 
+case "$LAYOUT" in
+	rows | cols) ;;
+	*)
+		printf 'trio-tmux.sh: --layout 只接受 rows 或 cols，收到：%s\n' "$LAYOUT" >&2
+		exit 2
+		;;
+esac
+
 # ── 环境校验 ───────────────────────────────────────────────────────────────
 
 if ! command -v tmux >/dev/null 2>&1; then
@@ -137,6 +160,7 @@ done
 
 session_default="trio-$(basename "$PROJECT_DIR" | tr -c '[:alnum:]._-' '-')"
 SESSION_NAME="${SESSION_NAME:-$session_default}"
+WINDOW_TARGET="${SESSION_NAME}:trio"
 
 # ── 会话冲突 ───────────────────────────────────────────────────────────────
 
@@ -154,15 +178,15 @@ if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
 	fi
 fi
 
-# ── 组装每个窗口的命令 ─────────────────────────────────────────────────────
-# 默认用 env -u TRIO_MODEL 清掉父 shell 残留值，让三个窗口都用 start-agent 的
+# ── 组装每个 pane 的命令 ───────────────────────────────────────────────────
+# 默认用 env -u TRIO_MODEL 清掉父 shell 残留值，让三个 pane 都用 start-agent 的
 # 默认模型；给了 --model 就转成 TRIO_MODEL 传给 start-agent，走同一条路径。
 
 shell_quote() {
 	printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
 }
 
-window_command() {
+pane_command() {
 	local role="$1"
 	local cmd
 	if [[ -n "$MODEL" ]]; then
@@ -173,33 +197,57 @@ window_command() {
 	printf '%s' "$cmd"
 }
 
-# ── 创建会话 ───────────────────────────────────────────────────────────────
+# ── 创建会话：单 window，三个 pane ─────────────────────────────────────────
 
-first=1
-for role in arch dev qa; do
-	if [[ "$first" -eq 1 ]]; then
-		tmux new-session -d -s "$SESSION_NAME" -n "$role" -c "$PROJECT_DIR" "$(window_command "$role")"
-		first=0
-	else
-		tmux new-window -t "$SESSION_NAME" -n "$role" -c "$PROJECT_DIR" "$(window_command "$role")"
-	fi
+if [[ "$LAYOUT" == "rows" ]]; then
+	split_flag="-v"
+	layout_name="even-vertical"
+else
+	split_flag="-h"
+	layout_name="even-horizontal"
+fi
+
+tmux new-session -d -s "$SESSION_NAME" -n trio -c "$PROJECT_DIR" "$(pane_command "${ROLES[0]}")"
+# 显式指定被分割的 pane 索引，保证创建顺序稳定为 0=arch, 1=dev, 2=qa。
+tmux split-window "$split_flag" -t "${WINDOW_TARGET}.0" -c "$PROJECT_DIR" "$(pane_command "${ROLES[1]}")"
+tmux split-window "$split_flag" -t "${WINDOW_TARGET}.1" -c "$PROJECT_DIR" "$(pane_command "${ROLES[2]}")"
+
+# 均分三块；select-layout 只改几何，不改变 pane 索引。
+tmux select-layout -t "$WINDOW_TARGET" "$layout_name"
+
+# ── pane 边框标题 ──────────────────────────────────────────────────────────
+# 三块里跑的是同一个 TUI，没有标题就只能靠位置记忆判断身份。
+
+tmux set-option -w -t "$WINDOW_TARGET" pane-border-status top
+tmux set-option -w -t "$WINDOW_TARGET" pane-border-format " #{pane_title} "
+for i in 0 1 2; do
+	tmux select-pane -t "${WINDOW_TARGET}.${i}" -T "${ROLE_TITLES[$i]}"
 done
 
-# 窗口失败时保留（否则 exec omp 一退出窗口就消失，看不到错误）。
+# 窗口失败时保留（exec omp 一退出 pane 就消失，看不到错误）。
 if [[ "$REMAIN_ON_FAIL" -eq 1 ]]; then
-	tmux set-option -t "$SESSION_NAME" remain-on-exit failed
+	tmux set-option -w -t "$WINDOW_TARGET" remain-on-exit failed
 fi
 
-tmux select-window -t "$SESSION_NAME:arch"
+# 初始焦点给 ARCH：契约先行。
+tmux select-pane -t "${WINDOW_TARGET}.0"
+tmux select-window -t "$WINDOW_TARGET"
 
-printf '已创建 tmux 会话：%s\n' "$SESSION_NAME"
-printf '  窗口：arch / dev / qa（共享 %s）\n' "$PROJECT_DIR"
-if [[ -n "$MODEL" ]]; then
-	printf '  模型：%s（三个窗口一致，TRIO_MODEL 覆盖）\n' "$MODEL"
+# ── 汇总 ───────────────────────────────────────────────────────────────────
+
+printf '已创建 tmux 会话：%s（单窗口三分屏）\n' "$SESSION_NAME"
+if [[ "$LAYOUT" == "rows" ]]; then
+	printf '  布局：rows（上中下）ARCH → DEV → QA\n'
 else
-	printf '  模型：start-agent 默认（见各窗口启动横幅；进入后 /model 可切换）\n'
+	printf '  布局：cols（左中右）ARCH → DEV → QA\n'
 fi
-printf '  切换：Ctrl-b 然后 w 列窗口 / 数字键直选\n'
+printf '  项目：%s\n' "$PROJECT_DIR"
+if [[ -n "$MODEL" ]]; then
+	printf '  模型：%s（三个 pane 一致，TRIO_MODEL 覆盖）\n' "$MODEL"
+else
+	printf '  模型：start-agent 默认（见各 pane 启动横幅；进入后 /model 可切换）\n'
+fi
+printf '  操作：Ctrl-b + 方向键切 pane / Ctrl-b z 放大当前 pane / Ctrl-b d 脱离\n'
 
 if [[ "$ATTACH" -eq 1 ]]; then
 	exec tmux attach -t "$SESSION_NAME"

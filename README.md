@@ -65,7 +65,8 @@ omp-trio-scaffold/
 │   └── pre-commit               提交门禁脚本
 ├── .omp/                        脚手架自身的运行时副本
 │   ├── trio/{arch,dev,test}.rules.md + policy.txt
-│   └── hooks/pre/trio-guard.ts  进程内写门禁
+│   ├── hooks/pre/trio-guard.ts  进程内写门禁
+│   └── extensions/trio-session-name.ts  会话名自动设为角色
 ├── tests/
 │   ├── trio-policy.test.mjs     门禁策略回归测试
 │   ├── trio-check-report.test.mjs  报告校验器回归测试
@@ -178,17 +179,29 @@ bin/start-agent.sh qa        # 对抗测试
 1. 导出 `TRIO_ROLE` —— 门禁的身份来源（hook 与 pre-commit 共用）
 2. 用 `--append-system-prompt` 注入对应角色简报
 
-### 方式 B：tmux 三窗口
+### 方式 B：tmux 单窗口三分屏
+
+把当前终端切成三块，每块一个角色。一个 window、三个 pane——不是三个 window。
 
 ```bash
-bin/trio-tmux.sh                       # 默认在当前目录建 trio-<目录名> 会话
+bin/trio-tmux.sh                      # 默认左中右（横屏）
+bin/trio-tmux.sh --layout rows        # 上中下（竖屏）
 bin/trio-tmux.sh --project ~/projects/my-app --session trio-app
-bin/trio-tmux.sh --no-attach           # 只建会话，稍后 tmux attach
-bin/trio-tmux.sh --force               # 会话已存在时重建
+bin/trio-tmux.sh --no-attach          # 只建会话，稍后 tmux attach
+bin/trio-tmux.sh --force              # 会话已存在时重建
 ```
 
-三个窗口 `arch` / `dev` / `qa` 共享同一项目目录与同一 git 工作树。
-窗口默认 `remain-on-exit failed`：omp 异常退出时保留窗口以便读错误。
+| 布局 | 排列 | 适合 |
+|---|---|---|
+| `cols`（默认） | 左 → 右：`ARCH` `DEV` `QA` | 宽屏 / 横向终端 |
+| `rows` | 上 → 下：`ARCH` `DEV` `QA` | 竖屏 / 高窄终端 |
+
+每个 pane 顶部有边框标题显示角色名，当前焦点 pane 的边框高亮。初始焦点在 `ARCH`。
+pane 默认 `remain-on-exit failed`：omp 异常退出时保留 pane 以便读错误。
+
+常用按键：`Ctrl-b` + 方向键切 pane，`Ctrl-b z` 放大当前 pane，`Ctrl-b d` 脱离会话。
+
+> 三个 pane 共享同一项目目录与同一 git 工作树；隔离仍由写策略白名单保证。
 
 ### 模型：默认 `deepseek/deepseek-v4.1-flash`
 

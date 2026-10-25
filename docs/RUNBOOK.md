@@ -88,40 +88,74 @@ trio-start qa
 
 ---
 
-## 3. 方式 B：tmux 一键三窗口
+### 会话名自动同步为角色
+
+`.omp/extensions/trio-session-name.ts` 在 `session_start` 时把 omp 会话名设为
+`TRIO_ROLE`（`arch` / `dev` / `qa`）。走进程内扩展，不经过终端按键，因此没有
+「TUI 未就绪导致命令被当成聊天内容」的竞态。
+
+覆盖规则：**只在会话尚无标题时写入**。你手动 `/rename 登录改造` 之后，
+重开或 resume 都不会被改回角色名。
+
+> omp 没有 `--name` / `--title` 启动参数，hook 的 `sessionManager` 是只读的，
+> 只有 extension API 提供可写的 `setSessionName()`——这是自动命名的唯一可靠通道。
+
+## 3. 方式 B：tmux 单窗口三分屏
+
+把**一个**终端切成三块，每块跑一个角色。一个 window、三个 pane。
 
 ```bash
 cd ~/projects/my-app
-trio-tmux
+trio-tmux                 # 默认 cols（左中右）
+trio-tmux --layout rows   # rows（上中下）
 ```
 
-等价于手工执行：
+等价于手工执行（以 `cols` 为例）：
 
 ```bash
-tmux new-session -d -s trio-my-app -n arch -c ~/projects/my-app \
+tmux new-session -d -s trio-my-app -n trio -c ~/projects/my-app \
   "env -u TRIO_MODEL trio-start arch --project ~/projects/my-app"
-tmux new-window -t trio-my-app -n dev -c ~/projects/my-app \
+tmux split-window -h -t trio-my-app:trio.0 -c ~/projects/my-app \
   "env -u TRIO_MODEL trio-start dev --project ~/projects/my-app"
-tmux new-window -t trio-my-app -n qa -c ~/projects/my-app \
+tmux split-window -h -t trio-my-app:trio.1 -c ~/projects/my-app \
   "env -u TRIO_MODEL trio-start qa --project ~/projects/my-app"
-tmux select-window -t trio-my-app:arch
+tmux select-layout -t trio-my-app:trio even-horizontal
+tmux set-option -w -t trio-my-app:trio pane-border-status top
+tmux select-pane -t trio-my-app:trio.0 -T ARCH
+tmux select-pane -t trio-my-app:trio.1 -T DEV
+tmux select-pane -t trio-my-app:trio.2 -T QA
+tmux select-pane -t trio-my-app:trio.0
 tmux attach -t trio-my-app
 ```
+
+### 布局
+
+| `--layout` | 排列 | 几何 | 适合 |
+|---|---|---|---|
+| `cols`（默认） | 左→右 `ARCH` `DEV` `QA` | 三列等宽 | 宽屏 / 横屏显示器 |
+| `rows` | 上→下 `ARCH` `DEV` `QA` | 三行等高 | 竖屏 / 高窄终端 |
+
+布局由你按屏幕方向自己选，脚本不自动推断（`tmux new-session -d` 创建时拿到的是
+服务端 80×24 默认尺寸，量不到真实屏幕，猜出来是错的）。
 
 ### 参数
 
 | 参数 | 说明 |
 |---|---|
+| `--layout rows\|cols` | 分屏方向，默认 `cols` |
 | `--project <目录>` | 项目根，默认当前目录 |
 | `--session <名字>` | 会话名，默认 `trio-<目录名>` |
-| `--model <标识>` | 给三个窗口统一换模型；默认用 `start-agent.sh` 的默认模型 |
+| `--model <标识>` | 给三个 pane 统一换模型；默认用 `start-agent.sh` 的默认模型 |
 | `--no-attach` | 只创建会话，不自动接入（适合脚本） |
 | `--force` | 会话已存在时先 kill 重建 |
-| `--no-remain` | 窗口退出后立即关闭（默认失败时保留窗口，便于看报错） |
+| `--no-remain` | pane 退出后立即关闭（默认失败时保留 pane，便于看报错） |
 
 ### 常用组合
 
 ```bash
+# 竖屏
+trio-tmux --layout rows
+
 # 后台建好，稍后接入
 trio-tmux --no-attach
 tmux attach -t trio-my-app
@@ -137,14 +171,20 @@ trio-tmux --project ~/projects/other-app --session trio-other
 
 | 操作 | 按键 |
 |---|---|
-| 列出窗口 | `Ctrl-b` 然后 `w` |
-| 直选窗口 | `Ctrl-b` 然后 `0`/`1`/`2` |
-| 垂直分屏看两个角色 | `Ctrl-b` 然后 `%` |
+| 在三个 pane 间切换 | `Ctrl-b` 然后方向键（或 `o` 循环） |
+| 放大当前 pane（临时全屏） | `Ctrl-b` 然后 `z` |
+| 显示 pane 编号 | `Ctrl-b` 然后 `q` |
 | 脱离会话（进程继续跑） | `Ctrl-b` 然后 `d` |
 | 结束整个会话 | `tmux kill-session -t trio-my-app` |
 
-窗口默认设为 `remain-on-exit failed`：omp 异常退出时窗口保留，能读到错误；
-正常退出则窗口关闭。想改回一律关闭用 `--no-remain`。
+每个 pane 顶部有边框标题（`ARCH` / `DEV` / `QA`），当前焦点 pane 的边框高亮。
+初始焦点固定在 `ARCH`——契约先行。
+
+pane 默认 `remain-on-exit failed`：omp 异常退出时保留 pane，能读到错误；
+正常退出则 pane 关闭。想改回一律关闭用 `--no-remain`。
+
+> **不是三个 window**。`Ctrl-b` + `w` 的窗口列表里只有一个 `trio`。
+> 想全屏专注单个角色，用 `Ctrl-b z` 放大，而不是切窗口。
 
 ---
 

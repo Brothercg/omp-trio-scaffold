@@ -3,6 +3,7 @@
 .omp/*
 !.omp/trio/
 !.omp/hooks/
+!.omp/extensions/
 
 # ── omp 运行时产物 ─────────────────────────────────────────────────────────
 .omp/agent/

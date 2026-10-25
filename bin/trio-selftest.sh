@@ -97,15 +97,19 @@ HOOK="${PROJECT_DIR}/.omp/hooks/pre/trio-guard.ts"
 POLICY="${PROJECT_DIR}/.omp/trio/policy.txt"
 PRECOMMIT="${PROJECT_DIR}/.git/hooks/pre-commit"
 VALIDATOR="${PROJECT_DIR}/bin/trio-check-report.mjs"
+EXTENSION="${PROJECT_DIR}/.omp/extensions/trio-session-name.ts"
 
 TASK_DIR="${PROJECT_DIR}/docs/task/TRIO-SELFTEST"
+# 每次运行注入唯一标记：若 HEAD 里残留同内容夹具，git add 会变成 no-op，
+# 导致 git commit 以「无改动」退出 1，被误判成「门禁拒绝」。
+RUN_ID="$(date +%s)-$$"
 REPORT_OK="${TASK_DIR}/qa-20261025-1510-report-selftest.md"
 REPORT_BAD="${TASK_DIR}/qa-20261025-1520-report-selftest-bad.md"
 
 bold "[1/8] 安装完整性"
 
 missing=0
-for pair in "hook:${HOOK}" "策略:${POLICY}" "报告校验器:${VALIDATOR}"; do
+for pair in "hook:${HOOK}" "策略:${POLICY}" "报告校验器:${VALIDATOR}" "会话名扩展:${EXTENSION}"; do
 	name="${pair%%:*}"
 	path="${pair#*:}"
 	if [[ -f "$path" ]]; then
@@ -225,7 +229,7 @@ probe_commit dev "tests/trio_probe_test.py"
 check "DEV 提交 tests/ 被拒绝" "fail" "$?"
 
 # DEV 提交 ARCH 的契约文件 → 拒绝（跨角色）
-printf '# fake spec\n' >"${TASK_DIR}/arch-20261025-0900-spec.md"
+printf '# fake spec\n<!-- run:%s -->\n' "$RUN_ID" >"${TASK_DIR}/arch-20261025-0900-spec.md"
 probe_commit dev "${TASK_DIR#"${PROJECT_DIR}"/}/arch-20261025-0900-spec.md"
 check "DEV 提交 ARCH 契约被拒绝" "fail" "$?"
 
@@ -258,6 +262,7 @@ cat >"$REPORT_OK" <<'REPORT'
 
 总判定：通过。覆盖度：对照契约 1 条，共 1 条，通过 1、半通过 0、未通过 0、SKIP 0（SKIP 不计 PASS，单列计账）。
 REPORT
+printf '\n<!-- run:%s -->\n' "$RUN_ID" >>"$REPORT_OK"
 
 report_rel="${REPORT_OK#"${PROJECT_DIR}"/}"
 probe_commit qa "$report_rel"

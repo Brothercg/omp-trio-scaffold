@@ -7,6 +7,7 @@
 #   2. 注入 .omp/trio/  —— 角色简报、写策略真值源
 #   3. 注入 .omp/trio/templates/ —— 任务产物模板（看板/契约/交付/报告/缺陷/裁决）
 #   4. 注入 .omp/hooks/pre/trio-guard.ts —— 进程内写前拦截
+#      注入 .omp/extensions/trio-session-name.ts —— 会话名自动设为角色
 #   5. 注入 .git/hooks/pre-commit + bin/trio-check-report.mjs —— 提交兜底与报告校验
 #   6. 注入 tests/ —— 门禁策略与报告校验器的回归测试
 #
@@ -167,11 +168,14 @@ for template in "${SCAFFOLD_ROOT}"/templates/*.md; do
 	create_file "${TARGET_DIR}/.omp/trio/templates/$(basename "$template")" "$template"
 done
 
-# ── 4. 进程内写门禁 hook ──────────────────────────────────────────────────
+# ── 4. 进程内写门禁 hook + 会话名扩展 ─────────────────────────────────────
 
-printf '\n[4/6] 进程内写门禁（omp hook）\n'
+printf '\n[4/6] 进程内门禁与扩展（omp hook / extension）\n'
 create_file "${TARGET_DIR}/.omp/hooks/pre/trio-guard.ts" \
 	"${SCAFFOLD_ROOT}/.omp/hooks/pre/trio-guard.ts"
+# 会话名扩展：session_start 时把会话名设为 TRIO_ROLE（仅当尚无标题）。
+create_file "${TARGET_DIR}/.omp/extensions/trio-session-name.ts" \
+	"${SCAFFOLD_ROOT}/.omp/extensions/trio-session-name.ts"
 
 # ── 5. 提交前兜底门禁 + 报告校验器 ────────────────────────────────────────
 

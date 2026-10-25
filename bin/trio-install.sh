@@ -98,7 +98,8 @@ for required in \
 	"bin/trio-check-report.mjs" \
 	"templates/pre-commit" \
 	".omp/trio/policy.txt" \
-	".omp/hooks/pre/trio-guard.ts"; do
+	".omp/hooks/pre/trio-guard.ts" \
+	".omp/extensions/trio-session-name.ts"; do
 	if [[ ! -f "${SCAFFOLD_ROOT}/${required}" ]]; then
 		printf 'trio-install.sh: 脚手架不完整，缺少 %s\n' "$required" >&2
 		MISSING=1
