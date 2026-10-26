@@ -202,7 +202,7 @@ console.log("\n[AC-12 通道回收核验（TASK-002）]");
 // 本测试按当前看板状态切换断言；报告层面把签字前的结果记 SKIP（不计 PASS）。
 check("AC-12（pending）按看板状态核验：user_signed 前查残留护栏，签字后查回收三件套", () => {
 	const policy = read(".omp", "trio", "policy.txt");
-	const boardPath = path.join(ROOT, "docs", "task", "2026-10-26-发布门禁复盘", "board.md");
+	const boardPath = path.join(ROOT, "docs", "task", "TASK-002-2026-10-26-发布门禁复盘", "board.md");
 	const board = fs.readFileSync(boardPath, "utf8");
 	const state = (board.match(/\|\s*当前状态\s*\|\s*`([^`]+)`\s*\|/) ?? [])[1] ?? "";
 

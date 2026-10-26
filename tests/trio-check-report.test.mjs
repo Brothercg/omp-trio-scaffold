@@ -18,6 +18,7 @@ import {
 	checkText,
 	checkName,
 	checkCompanions,
+	checkT10,
 	main,
 	VERDICTS,
 } from "../bin/trio-check-report.mjs";
@@ -310,6 +311,151 @@ check("填充后的模板可通过校验", () => {
 		[],
 		"填充后的模板应零违规",
 	);
+});
+
+// ── 12. T10 路径存在性（TASK-003 / spec §1.5、AC-5/6/7）────────────────────
+
+console.log("\n[T10 路径存在性]");
+
+// fixture：在临时目录建一个带真实文件的树，报告正文用单反引号引用路径。
+// 用例同时覆盖 AC-5（基本行为）与 AC-6（边界口径），逐字按 spec §1.5 算法断言。
+
+/**
+ * 建一份可过 T1–T9 的最小合法报告正文；`body` 为结果表前面的扩展正文。
+ */
+function t10Report(body) {
+	return `# T10 夹具 · 验收报告
+
+> 运行环境：bun 1.4.2 / git 2.51.0
+> 基线 commit：0425e60
+> 运行时间：2026-10-25 15:10
+
+${body}
+
+| 用例 | 位置 | 结论 | 说明 |
+|---|---|---|---|
+| AC-1 | — | 通过 | — |
+
+## 汇总
+
+总判定：通过。覆盖度：对照契约 1 条，通过 1、SKIP 0。
+`;
+}
+
+check("AC-5a 引用真实存在的路径 → 0 违例", () => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "trio-t10-"));
+	fs.mkdirSync(path.join(dir, "tests"), { recursive: true });
+	fs.writeFileSync(path.join(dir, "tests", "x.py"), "def test_x(): pass\n");
+	const text = t10Report("见 `tests/x.py`。");
+	assert.deepEqual(checkText(GOOD_NAME, text, dir), []);
+});
+
+check("AC-5b 引用不存在的路径 → 恰 1 条 T10、规则号/行号/消息逐字", () => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "trio-t10-"));
+	fs.mkdirSync(path.join(dir, "tests"), { recursive: true });
+	fs.writeFileSync(path.join(dir, "tests", "x.py"), "def test_x(): pass\n");
+	const text = t10Report("见 `docs/nope/missing.md`。");
+	const violations = checkText(GOOD_NAME, text, dir);
+	assert.equal(violations.length, 1, `期望恰 1 条违例，实际 ${JSON.stringify(violations)}`);
+	const [violation] = violations;
+	assert.equal(violation.rule, "T10");
+	const missingLine = text.split("\n").findIndex((l) => l.includes("docs/nope/missing.md")) + 1;
+	assert.equal(violation.line, missingLine);
+	assert.equal(violation.message, "引用路径不存在：docs/nope/missing.md");
+});
+
+check("AC-6a glob 字符 token 不校验 → 0 违例", () => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "trio-t10-"));
+	for (const body of [
+		"匹配 `docs/task/*/board.md` 与 `tests/*`。",
+		"范围 `tests/?.py` 与字符类 `docs/[a-z].md`。",
+	]) {
+		assert.deepEqual(checkText(GOOD_NAME, t10Report(body), dir), []);
+	}
+});
+
+check("AC-6b ::nodeid 与 :行号 剥后缀后校验（存在 → 0；删源 → 恰 1）", () => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "trio-t10-"));
+	fs.mkdirSync(path.join(dir, "src"), { recursive: true });
+	fs.mkdirSync(path.join(dir, "tests"), { recursive: true });
+	fs.writeFileSync(path.join(dir, "src", "a.py"), "def f(): pass\n");
+	fs.writeFileSync(path.join(dir, "tests", "a.py"), "def test_x(): pass\n");
+	const text = t10Report("入口 `tests/a.py::test_x` 与 `src/a.py:42`。");
+	assert.deepEqual(checkText(GOOD_NAME, text, dir), [], "两路径存在时应为 0 违例");
+	fs.unlinkSync(path.join(dir, "src", "a.py"));
+	const violations = checkText(GOOD_NAME, text, dir);
+	assert.equal(violations.length, 1);
+	assert.equal(violations[0].rule, "T10");
+	assert.equal(violations[0].message, "引用路径不存在：src/a.py");
+});
+
+check("AC-6c 三反引号 fenced 块内不存在路径 → 0 违例", () => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "trio-t10-"));
+	const text = t10Report("示例：\n\n```text\n$ bun bin/trio-check-report.mjs docs/nope/fenced.md\n```\n");
+	assert.deepEqual(checkText(GOOD_NAME, text, dir), []);
+});
+
+check("AC-6d 非反引号正文出现不存在路径 → 0 违例", () => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "trio-t10-"));
+	const text = t10Report("见 docs/nope/bare.md（无反引号）。\n");
+	assert.deepEqual(checkText(GOOD_NAME, text, dir), []);
+});
+
+check("AC-6e 裸文件名（无四前缀）→ 0 违例", () => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "trio-t10-"));
+	const text = t10Report("见 `missing.md` 与 `x.py`。\n");
+	assert.deepEqual(checkText(GOOD_NAME, text, dir), []);
+});
+
+check("AC-6f 标点包裹 → 剥标点后识别（中文括号 → 恰 1）", () => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "trio-t10-"));
+	const text = t10Report("见 `（src/gone.py）`。\n");
+	const violations = checkText(GOOD_NAME, text, dir);
+	assert.equal(violations.length, 1);
+	assert.equal(violations[0].rule, "T10");
+	assert.equal(violations[0].message, "引用路径不存在：src/gone.py");
+});
+
+check("spec §3 同行同路径多次出现 → 逐 token 逐条报违例（2 次 → 2 条）", () => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "trio-t10-"));
+	fs.mkdirSync(path.join(dir, "tests"), { recursive: true });
+	fs.writeFileSync(path.join(dir, "tests", "x.py"), "def test_x(): pass\n");
+	const text = t10Report("见 `docs/nope/missing.md` 与 `docs/nope/missing.md`。\n");
+	const violations = checkText(GOOD_NAME, text, dir);
+	assert.equal(violations.length, 2, `期望 2 条（不去重），实际 ${violations.length}`);
+	assert.ok(violations.every((v) => v.rule === "T10" && v.message.endsWith("docs/nope/missing.md")));
+});
+
+check("spec §3 空报告/仅表头 → T10 0 违例（不新增失败面）", () => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "trio-t10-"));
+	assert.deepEqual(checkT10([], dir), []);
+	assert.deepEqual(checkT10(["| 用例 | 位置 | 结论 | 说明 |", "|---|---|---|---|"], dir), []);
+});
+
+check("spec §3 大小写敏感：Docs/ 前缀不识别 → 0 违例", () => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "trio-t10-"));
+	const text = t10Report("见 `Docs/whatever.md`。\n");
+	assert.deepEqual(checkText(GOOD_NAME, text, dir), []);
+});
+
+check("第四参 Violation 构造器可注入（审计钩子签名）", () => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "trio-t10-"));
+	const seen = [];
+	class FakeViolation {
+		constructor(line, rule, message) {
+			this.line = line;
+			this.rule = rule;
+			this.message = message;
+			seen.push(rule);
+		}
+	}
+	checkT10(["见 `docs/nope/x.md`"], dir, FakeViolation);
+	assert.deepEqual(seen, ["T10"]);
+});
+
+check("AC-7 CLI --help 行为不变（T1–T10 更新后仍只校验一个文件参数）", () => {
+	const out = main(["--", path.join(TEMPLATES, "report.template.md")]);
+	assert.equal(out, 0);
 });
 
 // ── 汇总 ───────────────────────────────────────────────────────────────────
