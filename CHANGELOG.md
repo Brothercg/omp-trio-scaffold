@@ -6,6 +6,30 @@
 格式：每版本一节，条目按「新增 / 修改 / 修复 / 弃用」分组，注明关联任务或 ADR。
 -->
 
+## v0.3.0 — 2026-10-26
+
+三角色回复规范与任务接力机制（TASK-003，ADR-0004 / ADR-0005）。
+
+### 新增
+- `docs/REPLY-CONVENTIONS.md`：结论表、失败解释、路径规范、下一步任务分配块、
+  挂起清单与修订流程的单一真值源。
+- `bin/trio-check-report.mjs` T10：反引号内 `docs/`、`src/`、`tests/`、`bin/`
+  路径存在性校验；围栏内跳过，支持 nodeid / 行号 / 尾随斜杠剥离。
+- board 模板处置流程段（4 阶段链 + 迭代日志）与 §7 挂起清单；
+  `templates/report.template.md` 增加 T10、SKIP 数据源、轮次约定。
+- 任务目录命名 `TASK-<NNN>-<YYYY-MM-DD>-<slug>`；QA/DEV 轮次后缀约定。
+
+### 修改
+- `profiles/{arch,dev,test}.rules.md` 与 `.omp/trio/*.rules.md` 末尾追加
+  `docs/REPLY-CONVENTIONS.md` 指针块；三对逐字节相等。
+- 回收 TASK-002 / TASK-003 临时写通道，恢复 `deny * .omp/hooks/**`、
+  `deny * bin/**` 的 fail-closed 语义。
+
+### 测试
+- 新增 `tests/trio-reply-conventions.test.mjs`；扩展
+  `tests/trio-check-report.test.mjs` T10 段；同步目录改名后的契约路径。
+- QA 全量回归 299 项断言 0 失败；`bin/trio-selftest.sh --fast` 19/0。
+
 ## v0.2.0 — 2026-10-26
 
 发布门禁：push 与本机发布的三角色权限管控（TASK-001，ADR-0001）。
