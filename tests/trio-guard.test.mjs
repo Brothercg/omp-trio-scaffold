@@ -233,39 +233,51 @@ await expectAllow("DEV bash git status 放行", "dev", "bash", { command: "git s
 
 // ── 7. 门禁自保 ────────────────────────────────────────────────────────────
 
-console.log("\n[门禁自保与 TASK-002 临时写通道（AC-11）]");
+console.log("\n[门禁自保与通道回收后的 fail-closed（AC-11，verdict shared：回收后）]");
 
-// AC-11：root of trust 永不豁免（deny * 不受通道影响）。
-for (const target of [".omp/trio/policy.txt", ".git/hooks/pre-commit"]) {
+// deny *：policy / pre-commit / guard / 自检脚本 / 产物模板 —— 回收后任何角色一律拒绝。
+for (const target of [
+	".omp/trio/policy.txt",
+	".git/hooks/pre-commit",
+	".omp/hooks/pre/trio-guard.ts",
+	"bin/trio-selftest.sh",
+	"bin/init-agent.sh",
+	"templates/pre-push",
+	"templates/pre-commit",
+	"templates/board.template.md",
+]) {
 	for (const role of ["dev", "arch", "qa"]) {
-		await expectBlock(`[${role}] 不得写 ${target}（deny * 不受 TASK-002 通道影响）`, role, "write",
+		await expectBlock(`[${role}] 不得写 ${target}（通道回收后 deny * 全面恢复）`, role, "write",
 			{ path: target, content: "x" });
 	}
 }
 
-// AC-11：通道内 5 个窗口文件 → DEV 允许；arch / qa → 仍然拒绝（角色级 deny 优先）。
-const WINDOW_FILES = [
-	".omp/hooks/pre/trio-guard.ts",
-	"templates/pre-push",
-	"templates/board.template.md",
-	"bin/trio-selftest.sh",
-	"bin/init-agent.sh",
-];
-for (const target of WINDOW_FILES) {
-	await expectAllow(`[dev] 窗口文件放行：${target}（TASK-002 通道）`, "dev", "write",
-		{ path: target, content: "x" });
-	await expectBlock(`[arch] 窗口文件仍拒绝：${target}`, "arch", "write",
-		{ path: target, content: "x" });
-	await expectBlock(`[qa] 窗口文件仍拒绝：${target}`, "qa", "write",
-		{ path: target, content: "x" });
-}
+// 回收核验：BEGIN/END 标记必须清零；fail-closed 自动恢复。
+const policyText = POLICY;
+assert.ok(
+	!/BEGIN TASK-00[23]/.test(policyText),
+	"policy.txt 仍残留 BEGIN TASK-002 / TASK-003 通道段，应被整段删除",
+);
+assert.ok(
+	!/END TASK-00[23]/.test(policyText),
+	"policy.txt 仍残留 END TASK-002 / TASK-003 通道段，应被整段删除",
+);
+assert.ok(
+	/^deny\s+\*\s+\.omp\/hooks\/\*\*$/m.test(policyText),
+	"deny * .omp/hooks/** 未恢复",
+);
+assert.ok(
+	/^deny\s+\*\s+bin\/\*\*$/m.test(policyText),
+	"deny * bin/** 未恢复",
+);
+console.log("  ✓ 回收核验：BEGIN/END TASK-00[23] 清零 + deny * .omp/hooks/** 与 deny * bin/** 恢复");
 
-// AC-11：fail-closed —— 通道是精确文件放行，不是目录开洞。
-await expectBlock("[dev] 通道外 .omp/hooks/ 文件仍拒绝（fail-closed）", "dev", "write",
+// fail-closed —— 通道是精确文件放行，不是目录开洞；回收后通道位置回到 deny 全覆盖。
+await expectBlock("[dev] .omp/hooks/ 其他文件拒绝（fail-closed）", "dev", "write",
 	{ path: ".omp/hooks/pre/other.ts", content: "x" });
-await expectBlock("[dev] 通道外 bin/ 文件仍拒绝（fail-closed）", "dev", "write",
+await expectBlock("[dev] bin/ 其他文件拒绝（fail-closed）", "dev", "write",
 	{ path: "bin/other.sh", content: "x" });
-await expectBlock("[dev] 通道外 templates/ 文件仍拒绝（fail-closed）", "dev", "write",
+await expectBlock("[dev] templates/ 其他文件拒绝（fail-closed）", "dev", "write",
 	{ path: "templates/pre-commit", content: "x" });
 
 // ── 汇总 ───────────────────────────────────────────────────────────────────

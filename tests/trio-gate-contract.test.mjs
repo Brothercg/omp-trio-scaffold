@@ -200,33 +200,43 @@ console.log("\n[AC-12 通道回收核验（TASK-002）]");
 
 // AC-12 依赖 user_signed 时点：签字前核验「未提前回收」，签字后核验「彻底回收」。
 // 本测试按当前看板状态切换断言；报告层面把签字前的结果记 SKIP（不计 PASS）。
-check("AC-12（pending）按看板状态核验：user_signed 前查残留护栏，签字后查回收三件套", () => {
+check("AC-12 按 TASK-002 / TASK-003 两看板状态核验：签字前查未提前回收，签字后查回收三件套", () => {
 	const policy = read(".omp", "trio", "policy.txt");
-	const boardPath = path.join(ROOT, "docs", "task", "TASK-002-2026-10-26-发布门禁复盘", "board.md");
-	const board = fs.readFileSync(boardPath, "utf8");
-	const state = (board.match(/\|\s*当前状态\s*\|\s*`([^`]+)`\s*\|/) ?? [])[1] ?? "";
+	const readBoardState = (taskDir) => {
+		const boardPath = path.join(ROOT, "docs", "task", taskDir, "board.md");
+		const board = fs.readFileSync(boardPath, "utf8");
+		return {
+			board,
+			state: (board.match(/\|\s*当前状态\s*\|\s*`([^`]+)`\s*\|/) ?? [])[1] ?? "",
+		};
+	};
 
-	if (state !== "user_signed") {
-		// 签字前：回收不得提前发生（提前回收会让实现半途失去写权）。
+	// 读 TASK-002 看板 + TASK-003 看板的「当前状态」行首个反引号 token
+	const t2raw = readBoardState("TASK-002-2026-10-26-发布门禁复盘");
+	const t2state = (t2raw.board.match(/\|\s*当前状态\s*\|\s*`([^`]+)`/) ?? [])[1] ?? "";
+	const t3raw = readBoardState("TASK-003-2026-10-26-回复规范落地");
+	const t3state = (t3raw.board.match(/\|\s*当前状态\s*\|\s*`([^`]+)`/) ?? [])[1] ?? "";
+
+	const bothSigned = t2state === "user_signed" && t3state === "user_signed";
+	if (!bothSigned) {
+		// 签字未到全：回收不得提前发生
 		assert.ok(
 			policy.includes("BEGIN TASK-002") && policy.includes("END TASK-002"),
-			`看板状态为 ${state}（尚未 user_signed），但 policy.txt 通道段已被回收——提前回收会让 DEV 失去窗内文件的合法写权，属契约时序违例`,
+			`看板状态 T2=${t2state}、T3=${t3state}（尚未双侧 user_signed），但 policy.txt 通道段已被部分回收——回收作业未完成即视为时序违例`,
 		);
-		assert.doesNotMatch(
-			policy,
-			/^deny\s+\*\s+\.omp\/hooks\/\*\*/m,
-			`看板状态为 ${state}（尚未 user_signed），但 deny * .omp/hooks/** 已提前恢复——时序违例`,
-		);
-		console.log(`      （pending：看板状态 ${state}，未到 user_signed；本用例断言的是「未提前回收」，AC-12 实质核验待签字后重跑）`);
+		console.log(`      （pending：看板 T2=${t2state}、T3=${t3state}；本用例断言的是「未提前回收」，AC-12 实质核验待双侧 user_signed 后重跑）`);
 		return;
 	}
 
-	// user_signed 已发生 → 核验回收三件套。
+	// 双侧 user_signed → 核验回收三件套（两通道都要清零）。
 	assert.ok(!policy.includes("BEGIN TASK-002"), "policy.txt 仍残留 BEGIN TASK-002 通道段");
 	assert.ok(!policy.includes("END TASK-002"), "policy.txt 仍残留 END TASK-002 通道段");
+	assert.ok(!policy.includes("BEGIN TASK-003"), "policy.txt 仍残留 BEGIN TASK-003 通道段");
+	assert.ok(!policy.includes("END TASK-003"), "policy.txt 仍残留 END TASK-003 通道段");
 	assert.match(policy, /deny\s+\*\s+\.omp\/hooks\/\*\*/, "deny * .omp/hooks/** 未恢复");
 	assert.match(policy, /deny\s+\*\s+bin\/\*\*/, "deny * bin/** 未恢复");
-	assert.match(board, /回收/, "看板决策记录缺回收动作行");
+	assert.match(t2raw.board, /回收/, "TASK-002 看板决策记录缺回收动作行");
+	assert.match(t3raw.board, /回收/, "TASK-003 看板决策记录缺回收动作行");
 });
 
 // ── 汇总 ──────────────────────────────────────────────────────────────────
