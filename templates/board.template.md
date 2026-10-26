@@ -21,6 +21,17 @@
 | 任务目录 | `docs/task/2026-10-25-登录改造/` |
 | 工作树 / 分支 | `../wt-login` / `feat/login` |
 | 起始日期 | `2026-10-25` |
+| qa_report | `docs/task/2026-10-25-登录改造/qa-20261025-1510-report-登录覆盖.md`；exempt 任务填 `—` |
+| release_gate | `strict`（默认）或 `exempt(<reason>)`；reason 仅 `[A-Za-z0-9_-]+` |
+
+<!--
+qa_report：本任务 QA 报告路径。pre-push 会校验「报告在本任务目录、
+通过校验器、基线 commit 是待推提交的祖先」，且看板状态为
+qa_passed / user_signed。
+release_gate：缺省等同上表的 strict；自举/维护类任务（确实产不出 QA
+报告）才可写 exempt(<reason>)，且本看板「决策记录」段必须引用对应
+裁决编号（V-N 或 *-verdict-N.md）。pre-push 放行时会输出审计行。
+-->
 
 ## 2. 状态
 

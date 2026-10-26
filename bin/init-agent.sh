@@ -9,7 +9,7 @@
 #   4. 注入 .omp/hooks/pre/trio-guard.ts —— 进程内写前拦截
 #      注入 .omp/extensions/trio-session-name.ts —— 会话名自动设为角色
 #   5. 注入 .git/hooks/pre-commit + pre-push + bin/trio-check-report.mjs —— 提交兜底与报告校验
-#   6. 注入 tests/ —— 门禁策略与报告校验器的回归测试
+#   6. 注入 tests/ —— 全部门禁回归测试
 #
 # 幂等性：已存在的文件一律不覆盖（打印「跳过」），需要覆盖时显式加 --force。
 #
@@ -188,11 +188,9 @@ create_file "${TARGET_DIR}/bin/trio-check-report.mjs" \
 # ── 6. 门禁回归测试 ───────────────────────────────────────────────────────
 
 printf '\n[6/6] 门禁回归测试\n'
-create_file "${TARGET_DIR}/tests/trio-policy.test.mjs" "${SCAFFOLD_ROOT}/tests/trio-policy.test.mjs"
-create_file "${TARGET_DIR}/tests/trio-check-report.test.mjs" \
-	"${SCAFFOLD_ROOT}/tests/trio-check-report.test.mjs"
-create_file "${TARGET_DIR}/tests/trio-guard.test.mjs" \
-	"${SCAFFOLD_ROOT}/tests/trio-guard.test.mjs"
+for test_file in "${SCAFFOLD_ROOT}"/tests/*.test.mjs; do
+	create_file "${TARGET_DIR}/tests/$(basename "$test_file")" "$test_file"
+done
 
 # ── 汇总 ───────────────────────────────────────────────────────────────────
 

@@ -9,7 +9,7 @@
 #
 # 自测覆盖：
 #   1. 安装完整性：hook / 策略 / pre-commit / 校验器 / 模板
-#   2. 门禁策略与报告校验器的单元测试
+#   2. 全部 tests/*.test.mjs 门禁回归测试
 #   3. pre-commit 角色门禁：越权提交被拒、合规提交放行、无角色放行
 #   4. pre-commit 报告硬门禁：不合规报告被拒
 #   5. 真实 omp：write / edit / bash 三通道 + 角色白名单
@@ -174,25 +174,27 @@ if ! command -v bun >/dev/null 2>&1; then
 	red "  ✗ 缺少 bun，无法运行单元测试"
 	FAIL=$((FAIL + 1))
 else
-	for suite in "策略契约:${SCAFFOLD_ROOT}/tests/trio-policy.test.mjs" \
-		"报告契约:${SCAFFOLD_ROOT}/tests/trio-check-report.test.mjs" \
-		"hook 运行时:${SCAFFOLD_ROOT}/tests/trio-guard.test.mjs"; do
-		name="${suite%%:*}"
-		file="${suite#*:}"
-		if [[ ! -f "$file" ]]; then
-			red "  ✗ 测试文件缺失：${file}"
-			FAIL=$((FAIL + 1))
-			continue
-		fi
-		if bun "$file" >/tmp/trio-unit-out.$$ 2>&1; then
-			green "  ✓ ${name}测试通过（$(grep -oE '通过 [0-9]+ 项' /tmp/trio-unit-out.$$ | tail -1)）"
-			PASS=$((PASS + 1))
-		else
-			red "  ✗ ${name}测试失败："
-			sed 's/^/      /' /tmp/trio-unit-out.$$ | tail -20
-			FAIL=$((FAIL + 1))
-		fi
-	done
+	shopt -s nullglob
+	suites=("${SCAFFOLD_ROOT}"/tests/*.test.mjs)
+	shopt -u nullglob
+	if [[ ${#suites[@]} -eq 0 ]]; then
+		red "  ✗ 未找到任何测试套件：${SCAFFOLD_ROOT}/tests/*.test.mjs"
+		FAIL=$((FAIL + 1))
+	else
+		for file in "${suites[@]}"; do
+			name="${file##*/}"
+			name="${name%.test.mjs}"
+			if bun "$file" >/tmp/trio-unit-out.$$ 2>&1; then
+				summary="$(grep -oE '通过 [0-9]+ 项|[0-9]+ passed' /tmp/trio-unit-out.$$ | tail -1)"
+				green "  ✓ ${name} 测试通过（${summary:-完成}）"
+				PASS=$((PASS + 1))
+			else
+				red "  ✗ ${name} 测试失败："
+				sed 's/^/      /' /tmp/trio-unit-out.$$ | tail -20
+				FAIL=$((FAIL + 1))
+			fi
+		done
+	fi
 	rm -f /tmp/trio-unit-out.$$
 fi
 

@@ -3,7 +3,7 @@
 <!--
 落位：docs/task/2026-10-26-发布门禁复盘/board.md
 本任务由 DEV 发起：复盘 TASK-001（v0.2.0）发布过程中暴露的门禁契约缺口。
-当前状态为 blocked：当前 omp 进程仍缓存旧 policy，需用户重启会话后继续。
+当前状态为 testing：DEV 已按 spec v2 完成实现，交 QA 验证 AC-1~AC-12。
 -->
 
 ## 1. 标识
@@ -20,9 +20,9 @@
 
 | 字段 | 值 |
 |---|---|
-| 当前状态 | `blocked`（旧会话 policy 缓存未刷新） |
-| 最后推进人 | `DEV`（写 guard 被旧规则拒绝，未改实现文件） |
-| 最后更新 | `2026-10-26 06:04` |
+| 当前状态 | `testing` |
+| 最后推进人 | `DEV`（实现完成，交 QA） |
+| 最后更新 | `2026-10-26 09:33` |
 
 > 状态推进权见 `templates/board.template.md`。DEV 只负责提出缺口与证据，
 > 是否立项、如何定 AC、优先级排序由 ARCH 裁决；DEV 不修改契约与测试。
@@ -33,14 +33,14 @@
 
 | AC | 契约定稿 | 实现 | 验证 | 状态 |
 |---|---|---|---|---|
-| AC-1/2/3 guard 误伤消除（G-1a） | `☑`(v2) | `☐` | `☐` | 待 DEV（重启后） |
-| AC-4 证据绑定（G-6，取代 TASK-001 AC-7） | `☑`(v2) | `☐` | `☐` | 待 DEV |
-| AC-5/6 自举豁免放行（G-2） | `☑`(v2) | `☐` | `☐` | 待 DEV |
-| AC-7 rules 相等断言（G-3） | `☑`(v2) | `☐` | `☐` | 待 QA 补断言（当前两侧已相等） |
-| AC-8 selftest 自动发现（G-4） | `☑`(v2) | `☐` | `☐` | 待 DEV |
+| AC-1/2/3 guard 误伤消除（G-1a） | `☑`(v2) | `☑` | `☐` | 实现完成，待 QA |
+| AC-4 证据绑定（G-6，取代 TASK-001 AC-7） | `☑`(v2) | `☑` | `☐` | 实现完成，待 QA |
+| AC-5/6 自举豁免放行（G-2） | `☑`(v2) | `☑` | `☐` | 实现完成，待 QA |
+| AC-7 rules 相等断言（G-3） | `☑`(v2) | `☐` | `☐` | 两侧已相等；待 QA 补断言 |
+| AC-8 selftest 自动发现（G-4） | `☑`(v2) | `☑` | `☐` | 实现完成，待 QA |
 | AC-9 CHANGELOG 真值源（G-5） | `☑`(v2) | `☑` | `☐` | ARCH 已回补 v0.2.0，待 QA 验证 |
-| AC-10 board 字段进模板（G-2/6 配套） | `☑`(v2) | `☐` | `☐` | 待 DEV |
-| AC-11 临时写通道语义断言（V-2） | `☑`(v2) | `☐` | `☐` | 待 QA |
+| AC-10 board 字段进模板（G-2/6 配套） | `☑`(v2) | `☑` | `☐` | 实现完成，待 QA |
+| AC-11 临时写通道语义断言（V-2） | `☑`(v2) | `☐` | `☐` | 通道已落盘；待 QA 断言 |
 | AC-12 通道回收核验（V-2） | `☑`(v2) | `☐` | `☐` | 待 QA（user_signed 时点核验） |
 
 > G-1b（git add 拦截）裁决为**非缺陷（设计内）**，不进 AC；G-1c（绕过面）
@@ -57,7 +57,7 @@
 | B-5 | `contract-gap` | 无 `CHANGELOG.md` / `VERSION` / `package.json`；版本号只在 README 散文与 tag 中，发布靠手工 | `DEV` | `ARCH` | `04:50` |
 | B-6 | `contract-gap` | pre-push 的报告 glob 是全仓库、看板取 mtime 最新；放行证据未绑定待推任务 / 提交，旧报告可放行新推送 | `DEV` | `ARCH` | `04:50` |
 | B-7 | `已解决` | spec §8 分给 DEV 的 5 个文件被 policy 拒绝。V-2 裁决经任务级临时写通道放行（ADR-0003）；policy 窗口已由用户授权、ARCH 代落（commit `3fb519a`）。DEV 重启会话后开工 | `DEV` | `ARCH`（已处置） | `05:19` |
-| B-8 | `blocked` | 当前 omp 进程仍缓存旧 policy：DEV edit `.omp/hooks/pre/trio-guard.ts` 被 `命中禁止规则 (* .omp/hooks/**)` 拒绝，而新 policy 已将该行改为 `deny arch`/`deny qa` + 窗口 allow。需用户完全退出并重启 dev 会话 | `DEV` | 用户 | `06:04` |
+| B-8 | `已解决` | 旧会话 policy 缓存问题已由用户重启解决；guard 实测允许写窗口文件，实现完成 | `DEV` | 用户（已处置） | `06:04` |
 
 > 连续 3 轮未全绿 → 停手并在此记 `blocked` 四项。本任务尚无实现轮次。
 
@@ -72,8 +72,15 @@
 
 ## 6. 交接备注
 
-`implementing` 首步再次停：当前 omp 进程仍使用旧 policy 缓存（写入
-`.omp/hooks/pre/trio-guard.ts` 被 `deny * .omp/hooks/**` 拒绝，新 policy
-已无该行）。DEV 未修改任何实现文件、未绕过 guard。请用户**完全退出并重启
-dev 会话**（`bin/start-agent.sh dev` / `trio-start dev`），重启后 DEV 将
-看板推回 `implementing` 并按 spec v2 §8 继续。
+DEV 已交付，见 `dev-20261026-0933-release.md`。QA 重点：
+
+1. **AC-4 祖先边界**：rebase 后基线丢失、兄弟提交（非祖先）、全零 sha、
+   `qa_report` 跨任务目录；特别测「旧报告 + 新看板」不能放行。
+2. **AC-6 豁免伪造**：空 reason、非法字符、有 reason 但决策记录无 V-N/
+   verdict-N 引用；豁免放行必须 stdout 有审计行。
+3. **AC-11 通道越界**：窗口中恰 5 条 allow；第 6 条应红；arch/qa 写窗口
+   文件应拒绝；任意角色写 policy.txt / pre-commit 应拒绝。
+4. **AC-12 回收残留**：`user_signed` 后检查 BEGIN/END 段删除、两条
+   `deny *` 恢复、决策记录有回收行。
+5. 旧测试断言：`trio-guard`/`trio-policy` 各有 2 条、`trio-pre-push` 有 5 条
+   钉旧语义（AC-11 窗口 / TASK-001 AC-7），需按 v2 更新；DEV 未改 `tests/**`。

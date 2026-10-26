@@ -4,28 +4,167 @@
 #
 # 与 templates/pre-commit 共用 TRIO_ROLE 角色身份体系。职责分工：
 #   - pre-commit：提交前复核暂存区文件写权（文件维度）
-#   - pre-push  ：推送前校验发布权（对外动作维度，ADR-0001）
+#   - pre-push  ：推送前校验发布权与证据归属（对外动作维度，ADR-0002）
 #
-# 发布权决策（ADR-0001）：
-#   1. qa / arch（含别名 pm）→ 一律拒绝 push
-#   2. dev → 必须同时满足：
-#        a. 仓库内存在 qa-*-report-*.md 且全部通过报告校验器
-#        b. 存在 docs/task/*/board.md 且「当前状态」为 qa_passed / user_signed
-#   3. 无 TRIO_ROLE → 放行（人工推送合法逃生舱，与 pre-commit 同语义）
+# dev 放行路径（TASK-002 v2 / ADR-0002）：
+#   A 正常任务：board.qa_report -> 本任务目录 qa-*-report-*.md -> 校验器通过
+#               -> 报告基线 commit 是待推 local_sha 的祖先 -> 看板 qa_passed/user_signed
+#   B 自举/维护：board.release_gate=exempt(<reason>) + 决策记录含裁决引用
+#               -> 放行并输出审计行
+#   两者都不满足 -> exit 1，stderr 指明缺失项。
 #
-# 本 hook 不做 user_signed 的机械判定 —— hook 无法感知用户签字；
-# dev 在 qa_passed 与 user_signed 之间的发布窗口由 dev.rules.md 纪律约束。
+# 无 TRIO_ROLE -> 放行（用户本人的人工逃生舱，与 pre-commit 同语义）。
 #
 # 用法：作为 .git/hooks/pre-push 安装（由 bin/init-agent.sh 完成）。
 
 set -uo pipefail
 
-readonly REPORT_GLOB="docs/task/*/qa-*-report-*.md"
 readonly BOARD_GLOB="docs/task/*/board.md"
+readonly VALIDATOR_REL="bin/trio-check-report.mjs"
 readonly SELF="$(basename "$0")"
 
 log_error() { printf '%s: %s\n' "$SELF" "$*" >&2; }
 log_info() { printf '%s: %s\n' "$SELF" "$*"; }
+
+# 读取 board 标识段的一个字段：| key | value |
+field_value() {
+	local file="$1" key="$2"
+	awk -F'|' -v key="$key" '
+		index($2, key) {
+			v=$3
+			gsub(/^[[:space:]]+|[[:space:]]+$/, "", v)
+			gsub(/`/, "", v)
+			print v
+			exit
+		}' "$file"
+}
+
+# 从报告里取「基线 commit」的 hash；缺失/非法返回空。
+report_baseline() {
+	awk '
+		/基线 commit/ {
+			if (match($0, /[0-9a-fA-F]{7,40}/)) {
+				print substr($0, RSTART, RLENGTH)
+				exit
+			}
+		}' "$1"
+}
+
+# 决策记录段中是否有裁决编号引用（V-N 或 *-verdict-N.md）。
+has_verdict_ref() {
+	awk '
+		/^[[:space:]]*#+[[:space:]].*决策记录/ { in_section=1; next }
+		in_section && /^[[:space:]]*#+[[:space:]]/ { exit }
+		in_section && /(V-[0-9]+|verdict-[0-9]+)/ { found=1; exit }
+		END { exit found ? 0 : 1 }
+	' "$1"
+}
+
+is_zero_sha() {
+	[[ "$1" =~ ^0+$ ]]
+}
+
+resolve_commit() {
+	local sha="$1"
+	[[ -z "$sha" ]] && return 0
+	git rev-parse -q --verify "${sha}^{commit}" 2>/dev/null || true
+}
+
+check_baseline_ancestor() {
+	local baseline="$1" local_sha="$2"
+	if [[ -z "$local_sha" ]] || is_zero_sha "$local_sha"; then
+		return 0
+	fi
+	local commit
+	commit="$(resolve_commit "$local_sha")"
+	if [[ -z "$commit" ]]; then
+		log_error "TRIO 发布门禁：无法解析待推 commit '${local_sha}'，不能校验 merge-base"
+		return 1
+	fi
+	if ! git merge-base --is-ancestor "$baseline" "$commit" >/dev/null 2>&1; then
+		log_error "TRIO 发布门禁：merge-base 校验失败 —— 基线 ${baseline} 不是待推 commit ${commit} 的祖先"
+		return 1
+	fi
+	return 0
+}
+
+# qa_report 必须与 board 同任务目录，且文件名符合 qa-*-report-*.md。
+report_in_board_dir() {
+	local board="$1" report="$2"
+	[[ -f "$report" ]] || return 1
+	case "$(basename "$report")" in
+		qa-*-report-*.md) ;;
+		*) return 1 ;;
+	esac
+	local board_dir report_dir
+	board_dir="$(cd "$(dirname "$board")" && pwd -P)" || return 1
+	report_dir="$(cd "$(dirname "$report")" && pwd -P)" || return 1
+	[[ "$report_dir" == "$board_dir" ]]
+}
+
+check_path_a() {
+	local board="$1" report="$2"
+	shift 2
+	local -a refs=("$@")
+
+	if ! report_in_board_dir "$board" "$report"; then
+		log_error "TRIO 发布门禁：qa_report 未指向本任务目录的 qa-*-report-*.md：${report}"
+		return 1
+	fi
+
+	if ! command -v bun >/dev/null 2>&1; then
+		log_error "TRIO 发布门禁：校验报告需 bun，PATH 中找不到 bun"
+		return 1
+	fi
+	if [[ ! -f "$VALIDATOR_REL" ]]; then
+		log_error "TRIO 发布门禁：报告校验器缺失（${VALIDATOR_REL}）"
+		return 1
+	fi
+	if ! bun "$VALIDATOR_REL" "$report" >/dev/null 2>&1; then
+		bun "$VALIDATOR_REL" "$report" 2>&1 | tail -20 >&2
+		log_error "TRIO 发布门禁：QA 报告未全绿：${report}"
+		return 1
+	fi
+
+	local baseline
+	baseline="$(report_baseline "$report")"
+	if [[ ! "$baseline" =~ ^[0-9a-fA-F]{7,40}$ ]]; then
+		log_error "TRIO 发布门禁：报告基线 commit 缺失或非法：'${baseline:-<空>}'（拒绝，不静默放行）"
+		return 1
+	fi
+
+	local state
+	state="$(field_value "$board" 当前状态)"
+	if [[ "$state" != "qa_passed" && "$state" != "user_signed" ]]; then
+		log_error "TRIO 发布门禁：看板状态 '${state:-<空>}' 未达 qa_passed / user_signed"
+		return 1
+	fi
+
+	local sha
+	for sha in "${refs[@]}"; do
+		check_baseline_ancestor "$baseline" "$sha" || return 1
+	done
+	return 0
+}
+
+# 返回 0=豁免有效；1=不是 exempt；2=exempt 但格式/留痕不合法。
+check_path_b() {
+	local board="$1"
+	local gate
+	gate="$(field_value "$board" release_gate)"
+	[[ "$gate" == exempt* ]] || return 1
+	if [[ ! "$gate" =~ ^exempt\(([A-Za-z0-9_-]+)\)$ ]]; then
+		log_error "TRIO 发布门禁：release_gate 格式非法：'${gate}'（应为 exempt(<reason>)，reason=[A-Za-z0-9_-]+）"
+		return 2
+	fi
+	local reason="${BASH_REMATCH[1]}"
+	if ! has_verdict_ref "$board"; then
+		log_error "TRIO 发布门禁：release_gate=exempt(${reason}) 但决策记录缺少裁决引用"
+		return 2
+	fi
+	log_info "release_gate=exempt(${reason})"
+	return 0
+}
 
 ROLE="${TRIO_ROLE:-}"
 if [[ -z "$ROLE" ]]; then
@@ -52,60 +191,64 @@ cd "$PROJECT_ROOT" || exit 1
 
 if [[ "$ROLE" == "arch" || "$ROLE" == "qa" ]]; then
 	log_error "TRIO 发布门禁：arch / qa 无发布权（禁止 push / tag）"
-	log_error "决策来源：docs/architecture/ADR-0001-发布权与push管控.md"
+	log_error "决策来源：docs/architecture/ADR-0001-发布权与push管控.md、ADR-0002"
 	log_error "若为人工推送，请 unset TRIO_ROLE 再次推送"
 	exit 1
 fi
 
 # ── ROLE == dev ────────────────────────────────────────────────────────────
 
+# stdin: <local_ref> <local_sha> <remote_ref> <remote_sha>，每行一个 ref。
+local_shas=()
+while read -r _local_ref local_sha _remote_ref _remote_sha; do
+	[[ -n "${local_sha:-}" ]] && local_shas+=("$local_sha")
+done
+if [[ ${#local_shas[@]} -eq 0 ]]; then
+	# 手工执行 hook（无 stdin）时按当前 HEAD 判定；无 HEAD 则跳过 merge-base。
+	head_sha="$(git rev-parse --verify HEAD 2>/dev/null || true)"
+	local_shas=("${head_sha:-}")
+fi
+
 shopt -s nullglob
-report_files=(${REPORT_GLOB})
+boards=(${BOARD_GLOB})
 shopt -u nullglob
-
-if [[ ${#report_files[@]} -eq 0 ]]; then
-	log_error "TRIO 发布门禁：dev 推送被拒 —— 未找到任何 QA 验收报告"
-	log_error "放行前置：QA 报告全绿 + 看板状态 qa_passed / user_signed"
-	log_error "决策来源：docs/architecture/ADR-0001-发布权与push管控.md"
+if [[ ${#boards[@]} -eq 0 ]]; then
+	log_error "TRIO 发布门禁：未找到任何任务看板（${BOARD_GLOB}）；也未找到 QA 报告字段（qa_report）"
 	exit 1
 fi
 
-if ! command -v bun >/dev/null 2>&1; then
-	log_error "TRIO 发布门禁：校验报告需 bun，PATH 中找不到 bun"
-	log_error "安装 bun，或改为人工推送（unset TRIO_ROLE）。"
-	exit 1
-fi
+allowed=0
+for board in "${boards[@]}"; do
+	gate="$(field_value "$board" release_gate)"
+	if [[ "$gate" == exempt* ]]; then
+		check_path_b "$board"
+		rc=$?
+		if [[ "$rc" -eq 0 ]]; then
+			allowed=1
+			break
+		fi
+		continue
+	fi
+	if [[ -n "$gate" && "$gate" != "strict" ]]; then
+		log_error "TRIO 发布门禁：release_gate 取值非法：'${gate}'（应为 strict 或 exempt(<reason>)）"
+		continue
+	fi
 
-VALIDATOR_REL="bin/trio-check-report.mjs"
-if [[ ! -f "$VALIDATOR_REL" ]]; then
-	log_error "TRIO 发布门禁：报告校验器缺失"
-	log_error "重新运行安装脚本部署校验器，或改为人工推送（unset TRIO_ROLE）。"
-	exit 1
-fi
-
-for report in "${report_files[@]}"; do
-	if ! bun "$VALIDATOR_REL" "$report" >/dev/null 2>&1; then
-		bun "$VALIDATOR_REL" "$report" 2>&1 | tail -20 >&2
-		log_error "TRIO 发布门禁：QA 报告未全绿 → 拒绝推送。不合规文件：${report}"
-		log_error "修复报告或等 QA 复测后重新推送。决策来源：ADR-0001"
-		exit 1
+	report="$(field_value "$board" qa_report)"
+	if [[ -n "$report" ]]; then
+		if check_path_a "$board" "$report" "${local_shas[@]}"; then
+			allowed=1
+			break
+		fi
+	else
+		state="$(field_value "$board" 当前状态)"
+		log_error "TRIO 发布门禁：看板 ${board} 缺少 qa_report 字段（未找到本任务 QA 报告）；当前状态 '${state:-<空>}'"
 	fi
 done
 
-newest_board="$(ls -t ${BOARD_GLOB} 2>/dev/null | head -1)"
-if [[ -z "$newest_board" ]]; then
-	log_error "TRIO 发布门禁：dev 推送被拒 —— 未找到任何任务看板"
-	exit 1
+if [[ "$allowed" -eq 1 ]]; then
+	log_info "TRIO 发布门禁：dev 推送放行"
+	log_info "提醒：qa_passed → user_signed 之间的发布仍按 DEV 规则纪律，需等用户终验签字"
+	exit 0
 fi
-board_state="$(awk '/当前状态/ {print $4; exit}' "$newest_board" 2>/dev/null | tr -d '[:space:]' || true)"
-board_state="${board_state//\`/}"
-if [[ "$board_state" != "qa_passed" && "$board_state" != "user_signed" ]]; then
-	log_error "TRIO 发布门禁：dev 推送被拒 —— 看板状态 '${board_state:-<空>}' 未过 qa_passed"
-	log_error "看板：${newest_board}"
-	log_error "此窗口内的发布仍按 DEV 规则纪律，须等待用户终验签字（user_signed）"
-	exit 1
-fi
-
-log_info "TRIO 发布门禁：dev 推送放行（QA 全绿 + 看板 ${board_state}）"
-log_info "提醒：qa_passed → user_signed 之间的发布仍按 DEV 规则纪律，需等用户终验签字"
-exit 0
+exit 1

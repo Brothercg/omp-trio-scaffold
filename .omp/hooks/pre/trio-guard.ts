@@ -151,44 +151,346 @@ function toRelativePath(target: string, projectRoot: string): string | null {
 /**
  * 命中写意图的 shell 片段。只读命令（ls / cat / grep / git status / pytest …）
  * 不命中，因此 QA 仍可读取 tests/ 现状、Dev 仍可读取验收契约。
+ *
+ * ADR-0002：本层是**尽力而为**的第一道拦截；pre-commit / pre-push 才是权威。
+ * 因此这里只做保守的写目标抽取，不追求完备 shell 解析。
  */
-const WRITE_INTENT_PATTERNS: readonly RegExp[] = [
-	/\b(?:tee|dd|install|mktemp|truncate)\b/, // tee / dd / install / truncate
-	/\b(?:cp|mv|rm|rsync|unlink|shred)\b/, // 复制 / 移动 / 删除
-	/\bsed\b[^|;&]*\s-i\b/, // sed -i
-	/\bperl\b[^|;&]*\s-(?:i|pi|ip)\b/, // perl -i
-	/\bpython[0-9.]*\b[^|;&]*\s-c\b/, // python -c
-	/\b(?:python[0-9.]*|node|ruby|php)\b[^|;&]*\s<<<?/, // heredoc 脚本
-	/(?:^|[\s;&|(])(?:>|>>|1>|2>|&>)/, // 输出重定向
-	/\bchmod\b|\bchown\b/, // 改权限 / 属主
-	/\bgit\b[^\n]*\b(?:add|commit|checkout|restore|stash|apply|am)\b/, // git 写操作
-	/\bpatch\b/, // patch
-];
+interface ShellToken {
+	kind: "word" | "op";
+	value: string;
+}
 
-/** 从 shell 命令中抽取疑似目标路径（用于与禁写区求交集）。 */
-function extractPathTokens(command: string): string[] {
-	const tokens = new Set<string>();
-	// 重定向目标：> file / >> file
-	for (const match of command.matchAll(/(?:\d?>>?|&>)\s*([^\s;&|]+)/g)) {
-		tokens.add(match[1]);
+const SEGMENT_OPS = new Set(["|", "||", "&&", ";", "&", "\n"]);
+const IGNORED_REDIRECT_TARGETS = new Set(["/dev/null", "/dev/stdout", "/dev/stderr", "-"]);
+const WRAPPERS = new Set(["sudo", "env", "command", "builtin", "time", "nohup", "exec"]);
+const DEST_ONLY_WRITERS = new Set(["cp", "rsync", "install", "ln"]);
+const ALL_ARG_WRITERS = new Set([
+	"tee",
+	"dd",
+	"truncate",
+	"mktemp",
+	"mv",
+	"rm",
+	"unlink",
+	"shred",
+	"mkdir",
+	"rmdir",
+	"touch",
+	"chmod",
+	"chown",
+]);
+const GIT_WRITE_SUBCOMMANDS = new Set([
+	"add",
+	"commit",
+	"checkout",
+	"switch",
+	"restore",
+	"stash",
+	"apply",
+	"am",
+	"rm",
+	"mv",
+	"reset",
+]);
+const GIT_OPTION_VALUES = new Set([
+	"-m",
+	"--message",
+	"-F",
+	"--file",
+	"-b",
+	"-B",
+	"-c",
+	"-C",
+	"--orphan",
+	"--conflict",
+	"--git-dir",
+	"--work-tree",
+]);
+const CODE_OPTION_VALUES = new Set(["-c", "-e", "--eval", "--print"]);
+
+/**
+ * 轻量 shell 分词：处理引号/转义，并把重定向与管道/分号等操作符切成独立 token。
+ * 不展开变量与命令替换 —— 本层只做写目标抽样，不做 shell 语义复刻。
+ */
+function tokenizeShell(command: string): ShellToken[] {
+	const tokens: ShellToken[] = [];
+	let word = "";
+	let started = false;
+	let quote: "'" | '"' | null = null;
+	const flush = () => {
+		if (started) {
+			tokens.push({ kind: "word", value: word });
+			word = "";
+			started = false;
+		}
+	};
+	for (let i = 0; i < command.length; i++) {
+		const ch = command[i];
+		if (quote !== null) {
+			if (ch === quote) quote = null;
+			else if (ch === "\\" && quote === '"' && i + 1 < command.length) word += command[++i];
+			else word += ch;
+			continue;
+		}
+		if (ch === "\\" && i + 1 < command.length) {
+			word += command[++i];
+			started = true;
+			continue;
+		}
+		if (ch === "'" || ch === '"') {
+			quote = ch;
+			started = true;
+			continue;
+		}
+		if (/\s/.test(ch)) {
+			flush();
+			if (ch === "\n") tokens.push({ kind: "op", value: "\n" });
+			continue;
+		}
+		if (ch === ";" || ch === "|" || ch === "&") {
+			flush();
+			const next = command[i + 1] ?? "";
+			if (ch === "|" && next === "|") {
+				tokens.push({ kind: "op", value: "||" });
+				i++;
+			} else if (ch === "&" && next === "&") {
+				tokens.push({ kind: "op", value: "&&" });
+				i++;
+			} else if (ch === "&" && next === ">") {
+				let op = "&>";
+				i++;
+				if (command[i + 1] === ">") {
+					op = "&>>";
+					i++;
+				}
+				tokens.push({ kind: "op", value: op });
+			} else {
+				tokens.push({ kind: "op", value: ch });
+			}
+			continue;
+		}
+		if (ch === "<") {
+			flush();
+			let op = "<";
+			if (command[i + 1] === "<") {
+				op = "<<";
+				i++;
+				if (command[i + 1] === "<") {
+					op = "<<<";
+					i++;
+				}
+			}
+			tokens.push({ kind: "op", value: op });
+			continue;
+		}
+		if (ch === ">") {
+			flush();
+			let op = ">";
+			if (command[i + 1] === ">") {
+				op = ">>";
+				i++;
+			}
+			if (command[i + 1] === "&") {
+				op = ">&";
+				i++;
+			}
+			tokens.push({ kind: "op", value: op });
+			continue;
+		}
+		// fd 前缀：2> / 2>> / 2>& / 1> / 1>> / 1>& 等。
+		if (/[0-9]/.test(ch)) {
+			let j = i;
+			while (j < command.length && /[0-9]/.test(command[j])) j++;
+			if (command[j] === ">") {
+				flush();
+				let op = `${command.slice(i, j)}>`;
+				j++;
+				if (command[j] === ">") {
+					op += ">";
+					j++;
+				} else if (command[j] === "&") {
+					op += "&";
+					j++;
+				}
+				tokens.push({ kind: "op", value: op });
+				i = j - 1;
+				continue;
+			}
+		}
+		word += ch;
+		started = true;
 	}
-	// 命令参数中的路径样式 token（含目录分隔符的一段）。
-	// 前导字符类含引号与括号：路径常被 '...' 或 "..." 或 open('...') 包裹。
-	// 字符类内的 '/' 必须转义，否则会提前终止正则字面量。
-	// 末段允许为空：以 '/' 结尾的目录名（'cp -r src tests/'）也要捕获。
-	for (const match of command.matchAll(/(?:^|[\s'"(])([~.]?[\w.\/@+-]*\/[\w.\/@+-]*)/g)) {
-		const candidate = match[1];
-		// 排除纯 '/' 与空串：它们不是路径。
-		if (candidate.length > 1) tokens.add(candidate);
+	flush();
+	return tokens;
+}
+
+function stripShellQuotes(value: string): string {
+	return value.replace(/^["']|["']$/g, "");
+}
+
+/** fd 复制（2>&1 / 1>&2 / >&2）不是文件写；目标为 /dev/null 等也不算。 */
+function isFdDuplication(op: string, target: string): boolean {
+	if (!op.endsWith("&")) return false;
+	return /^[0-9]+$/.test(target) || target.startsWith("&");
+}
+
+function isAssignment(word: string): boolean {
+	return /^[A-Za-z_][A-Za-z0-9_]*=/.test(word);
+}
+
+/** 取位置参数：跳过选项与已知选项值；`--` 之后全部视为位置参数。 */
+function positionalArgs(args: readonly string[], optionValues: ReadonlySet<string> = new Set()): string[] {
+	const out: string[] = [];
+	let skipNext = false;
+	let afterDoubleDash = false;
+	for (const arg of args) {
+		if (skipNext) {
+			skipNext = false;
+			continue;
+		}
+		if (afterDoubleDash) {
+			out.push(arg);
+			continue;
+		}
+		if (arg === "--") {
+			afterDoubleDash = true;
+			continue;
+		}
+		if (optionValues.has(arg)) {
+			skipNext = true;
+			continue;
+		}
+		if (arg.startsWith("-") && arg !== "-") continue;
+		out.push(arg);
 	}
-	return [...tokens];
+	return out;
+}
+
+/** 从 python -c / node -e 的代码中只取真实写入调用，忽略内容字符串。 */
+function writeTargetsInCode(code: string): string[] {
+	return extractPathsFromCode(code);
+}
+
+/**
+ * 抽取一个命令段的真实写入目标：
+ *   - 重定向到文件的目标（fd 复制与 /dev/null 已在扫描时排除）
+ *   - 写动词的对象（cp/mv/rm/tee/sed -i/git add …），只取命令参数，
+ *     不取输入内容或代码里的路径字面量
+ */
+function segmentTargets(words: readonly string[], redirectTargets: readonly string[]): string[] {
+	const targets = [...redirectTargets];
+	let i = 0;
+	while (i < words.length) {
+		if (isAssignment(words[i]) || WRAPPERS.has(words[i])) {
+			i++;
+			continue;
+		}
+		break;
+	}
+	if (i >= words.length) return targets;
+	const command = path.basename(words[i]);
+	const args = words.slice(i + 1);
+
+	if (command === "git") {
+		let j = 0;
+		while (j < args.length) {
+			const arg = args[j];
+			if (arg === "-C" || arg === "-c" || arg === "--git-dir" || arg === "--work-tree") {
+				j += 2;
+				continue;
+			}
+			if (arg.startsWith("-")) {
+				j++;
+				continue;
+			}
+			break;
+		}
+		const sub = args[j];
+		if (!sub || !GIT_WRITE_SUBCOMMANDS.has(sub)) return targets;
+		// commit 只写索引/历史，消息参数不得当作路径；其余写子命令取位置参数。
+		targets.push(...positionalArgs(args.slice(j + 1), GIT_OPTION_VALUES));
+		return targets;
+	}
+
+	if (command === "dd") {
+		for (const arg of args) {
+			if (arg.startsWith("of=")) targets.push(arg.slice(3));
+		}
+		return targets;
+	}
+
+	if (DEST_ONLY_WRITERS.has(command)) {
+		// cp / rsync / install / ln：源是读，只有最后一个位置参数是写目标。
+		const positional = positionalArgs(args);
+		if (positional.length > 0) targets.push(positional[positional.length - 1]);
+		return targets;
+	}
+
+	if (ALL_ARG_WRITERS.has(command)) {
+		targets.push(...positionalArgs(args));
+		return targets;
+	}
+
+	if (command === "sed" || command === "perl") {
+		// 仅 -i（原地编辑）算写；脚本表达式不会被误当路径（不含目标目录前缀）。
+		if (!args.some(arg => /^-[a-zA-Z]*i/.test(arg))) return targets;
+		targets.push(...positionalArgs(args));
+		return targets;
+	}
+
+	if (command === "patch") {
+		targets.push(...positionalArgs(args));
+		return targets;
+	}
+
+	if (command === "python" || command === "python3" || command === "node" || command === "ruby" || command === "php") {
+		for (let k = 0; k < args.length - 1; k++) {
+			if (CODE_OPTION_VALUES.has(args[k])) {
+				targets.push(...writeTargetsInCode(args[k + 1]));
+				break;
+			}
+		}
+		return targets;
+	}
+
+	return targets;
 }
 
 function bashTargetsForbidden(command: string, forbiddenRelatives: readonly string[]): string[] {
 	if (forbiddenRelatives.length === 0) return [];
-	if (!WRITE_INTENT_PATTERNS.some(pattern => pattern.test(command))) return [];
+	const tokens = tokenizeShell(command);
 	const hits: string[] = [];
-	for (const token of extractPathTokens(command)) {
+	let words: string[] = [];
+	let redirects: string[] = [];
+	const flush = () => {
+		hits.push(...segmentTargets(words, redirects));
+		words = [];
+		redirects = [];
+	};
+	for (let i = 0; i < tokens.length; i++) {
+		const token = tokens[i];
+		if (token.kind === "op" && SEGMENT_OPS.has(token.value)) {
+			flush();
+			continue;
+		}
+		if (token.kind === "op" && (token.value === "<" || token.value === "<<" || token.value === "<<<")) {
+			i++; // 输入重定向：目标不是写入目标
+			continue;
+		}
+		if (token.kind === "op" && token.value.includes(">")) {
+			const target = tokens[++i];
+			if (!target || target.kind !== "word") continue;
+			const value = stripShellQuotes(target.value);
+			if (isFdDuplication(token.value, value) || IGNORED_REDIRECT_TARGETS.has(value)) continue;
+			redirects.push(value);
+			continue;
+		}
+		if (token.kind === "word") words.push(token.value);
+	}
+	flush();
+
+	const matched: string[] = [];
+	for (const token of hits) {
 		// 去掉引号与尾斜杠：'tests/' 与 'tests' 指向同一目录。
 		const normalized = token.replace(/^["']|["']$/g, "").replace(/\/+$/, "");
 		if (normalized.length === 0) continue;
@@ -196,14 +498,14 @@ function bashTargetsForbidden(command: string, forbiddenRelatives: readonly stri
 			const base = forbidden.endsWith("/**") ? forbidden.slice(0, -3) : forbidden;
 			// 命中：完全相等，或位于该目录之下（含目录本身）。
 			if (normalized === base || normalized.startsWith(`${base}/`)) {
-				hits.push(normalized);
+				matched.push(normalized);
 			}
 		}
 	}
 	// 去掉被更长路径覆盖的前缀项：
 	//   'tests/a'      被 'tests/a.txt' 覆盖（同名 + 更长后缀）
 	//   'tests/a'      被 'tests/a/b' 覆盖（目录关系）
-	const unique = [...new Set(hits)];
+	const unique = [...new Set(matched)];
 	return unique.filter(
 		(candidate) =>
 			!unique.some(
@@ -270,15 +572,17 @@ function inputPaths(toolName: string, input: Record<string, unknown>): string[] 
 	}
 }
 
-/** 从 Python/JS 代码里抽取文件路径字面量。 */
+/**
+ * 从 Python/JS 代码里抽取**真实写入目标**，不抽取普通字符串字面量。
+ * AC-3：内容里出现 "tests/x.test.mjs" 不应触发；只有 open()/writeFile()
+ * 这类写入调用的路径参数才参与判定。
+ */
 function extractPathsFromCode(code: string): string[] {
 	const paths = new Set<string>();
 	const patterns = [
-		/["'`]((?:\.{0,2}\/)?[\w./@-]+\/[\w./@-]+\.\w+)["'`]/g, // "src/a.py"
-		/["'`]((?:\.{0,2}\/)?[\w.-]+\.\w{1,5})["'`]/g, // "a.py"
-		/\bopen\s*\(\s*["'`]([^"'`]+)["'`]/g, // open("x")
-		/\b(?:writeFileSync|writeFile|appendFileSync|appendFile)\s*\(\s*["'`]([^"'`]+)["'`]/g,
-		/\bPath\s*\(\s*["'`]([^"'`]+)["'`]/g,
+		/\bopen\s*\(\s*["'`]([^"'`]+)["'`]/g, // open("x", "w")
+		/\b(?:writeFileSync|writeFile|appendFileSync|appendFile|write_text|write_bytes)\s*\(\s*["'`]([^"'`]+)["'`]/g,
+		/\bPath\s*\(\s*["'`]([^"'`]+)["'`]\s*\)\s*\.\s*(?:write_text|write_bytes|writeFileSync?|appendFileSync?)\s*\(/g,
 	];
 	for (const pattern of patterns) {
 		for (const match of code.matchAll(pattern)) {
