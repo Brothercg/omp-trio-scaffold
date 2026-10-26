@@ -52,12 +52,13 @@
 
 | 编号 | 类型 | 描述 | 提出 | 待谁 | 起始时间 |
 |---|---|---|---|---|---|
-| B-1 | `waiting_user` | TASK-003 临时写通道（10 条 `allow dev`，spec §7）需用户授权后由 ARCH 代落 policy；未授权则 DEV 对交付文件全部 fail-closed | `ARCH` | `用户` | `12:48` |
+| B-1 | `waiting_user` | TASK-003 写通道 policy diff：用户已确认推进，但 ARCH 代落被根信任 guard 拦截（`deny * .omp/trio/policy.txt`，设计如此，非误判）→ 改走 spec §7 逃生舱：**用户以人工会话（未设 `TRIO_ROLE`）或手工终端落盘**，diff 全文见 spec §7；落盘后 ARCH 核验、清 §7-1、交 DEV | `ARCH` | `用户` | `12:48` |
 
 ## 5. 决策记录
 
 | 时间 | 议题 | 裁决 | 落点 |
 |---|---|---|---|
+| `13:24` | TASK-003 写通道落盘被 guard 拦 | 非误判（`deny * policy.txt` 根信任设计）；改走 spec §7 逃生舱由用户人工落盘，禁止 ARCH 绕路 | board B-1 / 挂起清单 §7-1 |
 | `13:19` | 目录命名 / 流程标记 / 接力提示词（grill 9 问） | N1 目录 `TASK-<NNN>-<YYYY-MM-DD>-<slug>` 存量全回填；N2 文件名自由段带 `-第N轮`；N3 board 处置流程段（4 阶段链 + 迭代日志）；N4 提示词块替代三字段表（七段骨架、按需生成不预支）。改名清扫经用户授权 ARCH 代施（范围锁死，AC-10 核验） | `docs/architecture/ADR-0005-任务命名流程标记与接力提示词.md`、spec v2 |
 | `12:48` | TASK-003 立项（ADR-0004 D1–D6 落地） | spec v1 定稿；写通道复用 ADR-0003 模式（挂起清单 §7-1 待用户授权） | `arch-20261026-1248-spec.md`、`docs/architecture/ADR-0004-三角色回复规范与任务接力机制.md` |
 
@@ -78,7 +79,7 @@ QA 验收轮**必须重启会话**载入新 rules 指针后执行（AC-8 格式�
 
 | 条目 | 解除条件 | 触发者 | 解除后动作 |
 |---|---|---|---|
-| §7-1 TASK-003 写通道 policy 落盘（B-1） | 用户授权 | `ARCH` | 代落 spec §7 diff（BEGIN/END TASK-003 段，10 条 `allow dev`），显式 pathspec 提交 |
+| §7-1 TASK-003 写通道 policy 落盘（B-1） | 用户以人工会话落盘 spec §7 diff（guard 拦 ARCH，根信任设计如此） | `用户` | 落盘后 ARCH 核验窗口 10 条并清本项，交 DEV 开工 |
 | §7-2 通道回收核验（AC-9） | `user_signed` | `QA` | 确认 BEGIN/END TASK-003 段已删且 fail-closed 恢复，跑 `bun tests/trio-policy.test.mjs` 并记 qa 报告 |
 | §7-3 三窗口重启使新 rules 生效 | rules 指针落盘（spec §6 步骤 2 完成） | `用户` | 重启 arch / dev / qa 三窗口，后续回复按 `docs/REPLY-CONVENTIONS.md` |
 
