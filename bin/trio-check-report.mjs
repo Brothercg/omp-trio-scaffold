@@ -6,7 +6,7 @@
  * 就会出现「SKIP 计入 PASS」「总判定与逐条结论不一致」这类假绿 ——
  * 这类事故在迁移来源仓真实发生过（22 项 SKIP 被计为 passed）。
  *
- * 规则（T1–T9）：
+ * 规则（T1–T10）：
  *   T1 文件名     qa-<YYYYMMDD>-<HHMM>-report-<主题>.md
  *   T2 表头       运行环境 / 基线 commit / 运行时间 各一次，且运行时间与文件名同源
  *   T3 结果表     唯一 4 列表头 用例|位置|结论|说明 + 分隔行 + 至少一行
@@ -16,6 +16,7 @@
  *   T7 说明要件   未通过/半通过 → 期望/实际/复现；SKIP → 跳过原因/解除条件
  *   T8 汇总       非表格短文；总判定须与行值机械推导一致；SKIP 单列计账
  *   T9 载体       仅 Markdown，禁伴随 .json/.csv/.xlsx/.parquet
+ *   T10 路径     反引号 docs//src//tests//bin/ 路径必须真实存在
  *
  * 用法：
  *   bun bin/trio-check-report.mjs docs/task/<slug>/qa-20261025-1510-report-x.md
@@ -416,10 +417,59 @@ export function checkCompanions(filePath) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// T10 · 反引号路径存在性
+// ─────────────────────────────────────────────────────────────────────────────
+
+const T10_PREFIXES = ["docs/", "src/", "tests/", "bin/"];
+const T10_GLOB_CHARS = /[*?[\]<>~]/;
+const T10_LEADING = new Set(["(", "（", '"', "'"]);
+const T10_TRAILING = new Set([")", "）", '"', "'", ".", "，", ",", ";", "；", "：", ":"]);
+
+function stripT10Affixes(token) {
+	let start = 0;
+	let end = token.length;
+	while (start < end && T10_LEADING.has(token[start])) start += 1;
+	while (end > start && T10_TRAILING.has(token[end - 1])) end -= 1;
+	return token.slice(start, end);
+}
+
+export function checkT10(lines, root, ViolationCtor = Violation) {
+	const out = [];
+	let fenced = false;
+
+	lines.forEach((line, index) => {
+		if (line.trimStart().startsWith("```")) {
+			fenced = !fenced;
+			return;
+		}
+		if (fenced) return;
+
+		for (const match of line.matchAll(/`([^`]+)`/g)) {
+			for (const raw of match[1].split(/\s+/)) {
+				const token = stripT10Affixes(raw);
+				if (!T10_PREFIXES.some((prefix) => token.startsWith(prefix))) continue;
+				if (T10_GLOB_CHARS.test(token) || /\s/.test(token)) continue;
+
+				const referenced = token
+					.replace(/::.*$/, "")
+					.replace(/:[0-9]+$/, "")
+					.replace(/\/+$/, "");
+				if (referenced.length === 0) continue;
+				if (!fs.existsSync(path.resolve(root, referenced))) {
+					out.push(new ViolationCtor(index + 1, "T10", "引用路径不存在：" + referenced));
+				}
+			}
+		}
+	});
+
+	return out;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 汇总入口
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function checkText(filePath, text) {
+export function checkText(filePath, text, root = process.cwd()) {
 	const lines = text.split("\n");
 	const violations = [...checkName(filePath)];
 
@@ -431,6 +481,7 @@ export function checkText(filePath, text) {
 	}
 	violations.push(...table.violations);
 	violations.push(...checkCompanions(filePath));
+	violations.push(...checkT10(lines, root));
 
 	return violations;
 }
