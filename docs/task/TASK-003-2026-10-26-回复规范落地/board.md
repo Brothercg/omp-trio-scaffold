@@ -34,6 +34,7 @@
 - 第 0 轮 13:30：写通道落盘核验通过（§7-1 清零），② 交 DEV 开工
 - 第 0 轮 13:43（设计迭代）：`【突出】` 围栏外标红渲染定式化，spec v2 → v3（AC-1j）
 - 第 1 轮 13:46（开发迭代）：DEV 六步落盘 → ③ 交 QA 验收
+- 第 1 轮 14:12：③ QA 报告提 B-2/B-3 contract-gap → ARCH 联裁决（V-1/V-2，均判契约缺陷）→ spec v4；QA 依裁决改 tests 断言后复跑
 
 ②⇄③ 回环即迭代；轮次口径 = 3 轮熔断定义（「QA 判未通过 → DEV 修 → QA 复测」计 1 轮）。
 
@@ -57,13 +58,14 @@
 | 编号 | 类型 | 描述 | 提出 | 待谁 | 起始时间 |
 |---|---|---|---|---|---|
 | B-1 | `已解决` | TASK-003 写通道 policy diff：用户人工落盘完成，ARCH 核验通过（10 条 `allow dev` 与 spec §7 逐字一致，diff 纯追加、既有行零改动）；§7-1 清项，交 DEV | `ARCH` | `用户`（已处置） | `12:48` |
-| B-2 | `contract-gap` | AC-10b 严格口径与 spec 自身冲突：机械执行需改 spec 正文两处（ARCH 只读边界）。QA 机械记录：spec ×2 + dev 交付说明 ×2（含 smoke 输出引用）。请 ARCH 裁决口径（限定文本除外 / 接受例外 / 放开 DEV 可清 dev-* 内副本） | `DEV` | `ARCH` | `13:46` |
-| B-3 | `contract-gap` | AC-1j 要 REPLY-CONVENTIONS 含字面 `标红`，但 spec 附录 A（逐字落位基准，cmp BYTE-EQUAL）用「红色」「红字渲染用 `\textcolor{red}{...}`」，字面无法并入。落地件已含红色渲染能力与「围栏外」语义。请 ARCH 裁决 AC-1j 口径 | `QA` | `ARCH` | `13:58` |
+| B-2 | `已裁决` | AC-10b 口径欠限定（V-1：`契约缺陷`）：字面「全仓为 0」与自身定义载体矛盾。裁定记录类豁免（arch-*/dev-*/qa-*/board.md/docs/architecture/**），豁免外为 0；spec v4 已落，QA 按 V-1 §4 改 AC-10b 断言 | `DEV` | `ARCH`（已裁决） | `13:46` |
+| B-3 | `已裁决` | AC-1j 字面 `标红` 与附录 A 用词矛盾（V-2：`契约缺陷`）：断言对齐基准，改三标记口径（`红色`/`\textcolor{red`/`围栏外`）；附录 A 与 REPLY-CONVENTIONS 零改动，BYTE-EQUAL 保持；QA 按 V-2 §4 收紧断言、删桥接用例 | `QA` | `ARCH`（已裁决） | `13:58` |
 
 ## 5. 决策记录
 
 | 时间 | 议题 | 裁决 | 落点 |
 |---|---|---|---|
+| `14:12` | B-2/B-3 contract-gap 联裁决 | 两案均判 `契约缺陷`：V-1 AC-10b 改记录类豁免口径（豁免外为 0）；V-2 AC-1j 改三标记口径对齐附录 A（基准零改动、BYTE-EQUAL 保持）。spec v3→v4；tests 断言由 QA 按裁决处置表修正 | `arch-20261026-1412-verdict-1.md`、`arch-20261026-1412-verdict-2.md`、spec v4 |
 | `13:58` | TASK-003 QA 第 1 轮验收 | AC-1~8/10 通过 + AC-9 SKIP 计账；测试资产 3 件 commit（trio-reply-conventions 新建 29 项、trio-check-report T10 段 13 项、trio-gate-contract 改名后路径同步）；contract-gap B-2 主记录 + 扩展候选 + B-3（AC-1j）上报，挂 ARCH 裁决 | `docs/task/TASK-003-2026-10-26-回复规范落地/qa-20261026-1358-report-回复规范落地.md` |
 | `13:43` | 重启告警渲染（用户反馈看漏） | D5-4「着重突出」定式化：`【突出】` 存在时围栏外**标红**独立告警行（`\textcolor{red}{...}`）+ 围栏内原文保留；spec v2→v3（AC-1j） | `arch-20261026-1248-spec.md`（v3） |
 | `13:30` | TASK-003 写通道核验 | 用户人工落盘；ARCH 核验通过（10 条逐字一致、diff 纯追加零改动），§7-1 清项，交 DEV 开工 | board B-1 / 挂起清单 §7-1 |
