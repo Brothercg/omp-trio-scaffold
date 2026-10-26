@@ -82,6 +82,16 @@ function assertDenied(role, filePath) {
 	);
 }
 
+/** TASK-002 通道段：BEGIN/END 标记之间的文本。 */
+const POLICY_TEXT = fs.readFileSync(POLICY_PATH, "utf8");
+
+function policyWindow() {
+	const begin = POLICY_TEXT.indexOf("BEGIN TASK-002");
+	const end = POLICY_TEXT.indexOf("END TASK-002");
+	assert.ok(begin !== -1 && end !== -1, "policy.txt 缺少 BEGIN/END TASK-002 通道段");
+	return POLICY_TEXT.slice(begin, end);
+}
+
 // ── 1. 角色隔离矩阵 ────────────────────────────────────────────────────────
 
 console.log("\n[角色隔离矩阵]");
@@ -159,19 +169,64 @@ for (const file of ["CHANGELOG.md", "pyproject.toml", "setup.cfg", "setup.py"]) 
 
 console.log("\n[门禁自身保护]");
 
-for (const file of [
-	".omp/hooks/pre/trio-guard.ts",
-	".omp/trio/policy.txt",
-	".git/hooks/pre-commit",
-	"bin/init-agent.sh",
-	"bin/trio-check-report.mjs",
-]) {
-	check(`任何角色都不得写 ${file}`, () => {
+// AC-11：root of trust —— policy 真值源与 pre-commit 关卡对任何角色都 deny *，
+// 不受 TASK-002 临时写通道影响。
+for (const file of [".omp/trio/policy.txt", ".git/hooks/pre-commit"]) {
+	check(`任何角色都不得写 ${file}（deny * 不受 TASK-002 通道影响）`, () => {
 		assertDenied("arch", file);
 		assertDenied("dev", file);
 		assertDenied("qa", file);
 	});
 }
+
+// AC-11：TASK-002 临时写通道 —— 恰 5 条 dev 精确 allow；窗口文件集合封闭。
+const TASK2_WINDOW = [
+	".omp/hooks/pre/trio-guard.ts",
+	"templates/pre-push",
+	"templates/board.template.md",
+	"bin/trio-selftest.sh",
+	"bin/init-agent.sh",
+];
+check("TASK-002 通道窗口恰 5 条 dev allow（窗口文件集合固定）", () => {
+	const allowLines = policyWindow()
+		.split("\n")
+		.filter((line) => /^allow\s+dev\s+\S+/.test(line.trim()));
+	assert.equal(
+		allowLines.length,
+		5,
+		`TASK-002 窗口应为 5 条 allow，实际 ${allowLines.length} 条：\n${allowLines.join("\n")}`,
+	);
+	for (const target of TASK2_WINDOW) {
+		assert.ok(
+			new RegExp(`^allow\\s+dev\\s+${target.replace(/\./g, "\\.")}$`, "m").test(policyWindow()),
+			`通道段缺少 allow dev ${target}`,
+		);
+	}
+});
+
+check("BEGIN/END TASK-002 通道段存在于 policy（尚未回收）", () => {
+	const between = policyWindow();
+	for (const target of TASK2_WINDOW) {
+		assert.ok(
+			new RegExp(`^allow\\s+dev\\s+${target.replace(/\./g, "\\.")}$`, "m").test(between),
+			`通道段缺少 allow dev ${target}`,
+		);
+	}
+	// 目录级开洞（`allow dev .../**`）一旦出现，说明窗口被放大；
+	// 上一条断言已锁定恰 5 条精确 allow，这里额外防目录级 allow 混入。
+	assert.ok(!/^allow\s+\S+\s+\S+\*\*$/m.test(policyWindow()),
+		"通道段内不应出现目录级 allow（窗口是精确文件，不是开洞）");
+});
+
+for (const file of TASK2_WINDOW) {
+	check(`DEV 窗口内放行：${file}`, () => assertAllowed("dev", file));
+	check(`arch 窗口内仍拒绝：${file}（角色级 deny 优先）`, () => assertDenied("arch", file));
+	check(`qa 窗口内仍拒绝：${file}（角色级 deny 优先）`, () => assertDenied("qa", file));
+}
+
+check("DEV 通道外 fail-closed：.omp/hooks/ 其他文件拒绝", () => assertDenied("dev", ".omp/hooks/pre/other.ts"));
+check("DEV 通道外 fail-closed：bin/ 其他文件拒绝", () => assertDenied("dev", "bin/other.sh"));
+check("DEV 通道外 fail-closed：templates/ 其他文件拒绝", () => assertDenied("dev", "templates/pre-commit"));
 
 // ── 4. fail-closed ─────────────────────────────────────────────────────────
 

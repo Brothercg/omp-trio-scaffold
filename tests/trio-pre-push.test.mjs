@@ -14,6 +14,12 @@
  *   AC-9       SKIP 毒报告被拒（hook 经校验器）
  *
  * 运行：bun tests/trio-pre-push.test.mjs
+ *
+ * TASK-002 v2 契约（arch-20261026-0536-spec.md AC-4/5/6）取代 TASK-001 AC-7：
+ *   放行路径 A = board.qa_report → 本任务目录报告 → 校验器 → 报告基线 commit
+ *                是待推 local_sha 的祖先 → 看板 qa_passed/user_signed
+ *   放行路径 B = release_gate: exempt(<reason>) + 决策记录裁决引用 → 审计行
+ *   全零 sha 跳过 merge-base；qa_report 跨任务目录拒绝；报告基线非法拒绝。
  */
 
 import * as fs from "node:fs";
@@ -161,58 +167,262 @@ check("AC-8b 非法角色拒绝", () => {
 	assert.match(stderr, /取值非法/u);
 });
 
-console.log("\n[AC-4/5 dev 前置 a：报告]");
+// ── AC-4 证据绑定（qa_report + merge-base 祖先）────────────────────────────
+//
+// 报告基线 commit 必须是待推 local_sha 的祖先：
+//   - 真 repo 里造 B(基线) -- C(待推) 祖先链 → 放行
+//   - B 与 L 兄弟（非祖先）→ 拒绝且 stderr 含 merge-base 与两 hash
+//   - 全零 sha（删除 ref）→ 跳过 merge-base，其余前置照常
+//   - qa_report 指向他任务目录 → 拒绝（归属校验）
+//   - 报告基线缺失/非法 → 拒绝（不静默放行）
+//   - 旧报告不能放行新提交：基线在 L 之上（rev 说明 L 不是其后代不同场景）
+//     等价于「非祖先 → 拒绝」。
 
-check("AC-4 无报告拒绝", () => {
+/** 在 fixture 里造提交；返回 hash。 */
+function commit(repo, message) {
+	fs.writeFileSync(path.join(repo, "f.txt"), `${message}\n`);
+	execFileSync("git", ["add", "f.txt"], { cwd: repo });
+	return execFileSync("git", ["commit", "-q", "-m", message, "--allow-empty"], { cwd: repo })
+		.toString() || execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo }).toString().trim();
+}
+
+function revParse(repo, ref) {
+	return execFileSync("git", ["rev-parse", ref], { cwd: repo }).toString().trim();
+}
+
+function makeLineageRepo() {
 	const repo = makeFakeRepo();
-	const { code, stderr } = runHook(repo, "dev");
-	assert.equal(code, 1);
-	assert.match(stderr, /未找到任何 QA/u);
+	execFileSync("git", ["commit", "-q", "--allow-empty", "-m", "root"], { cwd: repo });
+	return repo;
+}
+
+/** 让 fixture 的报告基线指向指定 commit。 */
+function reportFor(repo, baselineSha) {
+	return GOOD_REPORT.replace("abc123def456789012345678901234567890abcd", baselineSha);
+}
+
+/** 以 stdin 喂 local_sha 运行 hook（模拟真实 pre-push 调用形态）。 */
+function runHookWithRefs(repo, role, ...localShas) {
+	let code, stdout, stderr;
+	const stdin = localShas.map((sha) => `refs/heads/main ${sha} refs/heads/main ${"0".repeat(40)}`).join("\n") + "\n";
+	try {
+		const out = execFileSync("bash", [HOOK], {
+			cwd: repo,
+			env: { ...process.env, TRIO_ROLE: role },
+			input: stdin,
+			stdio: ["pipe", "pipe", "pipe"],
+		});
+		code = 0;
+		stdout = String(out);
+		stderr = "";
+	} catch (error) {
+		code = error.status ?? 1;
+		stdout = String(error.stdout ?? "");
+		stderr = String(error.stderr ?? "");
+	}
+	return { code, stdout, stderr };
+}
+
+/** BOARD 加机器可读字段。 */
+function boardWith(state, extra = {}) {
+	const rows = Object.entries(extra)
+		.map(([key, value]) => `| ${key} | \`${value}\` |`)
+		.join("\n");
+	return `# 任务看板：测试
+
+## 2. 状态
+
+| 字段 | 值 |
+|---|---|
+| 当前状态 | \`${state}\` |
+| 起始日期 | \`2026-10-26\` |
+${rows}
+`;
+}
+
+function setBoard(repo, content) {
+	fs.mkdirSync(path.join(repo, "docs", "task", "x"), { recursive: true });
+	fs.writeFileSync(path.join(repo, "docs", "task", "x", "board.md"), content);
+}
+
+console.log("\n[AC-4 证据绑定：qa_report 归属 + merge-base 祖先]");
+
+check("AC-4a 报告基线 B 是待推 L 的祖先 → 放行", () => {
+	const repo = makeLineageRepo();
+	const b = revParse(repo, "HEAD");
+	execFileSync("git", ["commit", "-q", "--allow-empty", "-m", "work"], { cwd: repo });
+	const localSha = revParse(repo, "HEAD");
+	setBoard(repo, boardWith("qa_passed", { qa_report: "docs/task/x/qa-20261026-0430-report-t.md" }));
+	setReport(repo, reportFor(repo, b));
+	const { code, stdout } = runHookWithRefs(repo, "dev", localSha);
+	assert.equal(code, 0);
+	assert.match(stdout, /放行/u);
 });
 
-console.log("\n[AC-5 报告不合规 / AC-6 看板未达标 / AC-7 放行 / AC-9 毒报告]");
+check("AC-4b 基线 B 非待推 L 的祖先（兄弟提交）→ 拒绝且 stderr 含 merge-base 与两 hash", () => {
+	const repo = makeLineageRepo();
+	const b = revParse(repo, "HEAD");
+	// 在 orphan 分支上造一个与 B 无关的待推提交（必然非后代）
+	execFileSync("git", ["checkout", "-q", "--orphan", "sibling"], { cwd: repo });
+	execFileSync("git", ["commit", "-q", "--allow-empty", "-m", "sibling-work"], { cwd: repo });
+	const localSha = revParse(repo, "HEAD");
+	setBoard(repo, boardWith("qa_passed", { qa_report: "docs/task/x/qa-20261026-0430-report-t.md" }));
+	setReport(repo, reportFor(repo, b));
+	const { code, stderr } = runHookWithRefs(repo, "dev", localSha);
+	assert.equal(code, 1);
+	assert.match(stderr, /merge-base/u);
+	assert.ok(stderr.includes(b), `stderr 应含基线 hash ${b}`);
+	assert.ok(stderr.includes(localSha), `stderr 应含待推 hash ${localSha}`);
+});
 
-check("AC-5 报告不合规拒绝", () => {
-	const repo = makeFakeRepo();
-	setReport(repo, "not a valid report");
-	const { code, stderr } = runHook(repo, "dev");
+check("AC-4c 全零 sha（删除 ref 等价）跳过 merge-base，其余前置照常判定", () => {
+	const repo = makeLineageRepo();
+	const b = revParse(repo, "HEAD");
+	execFileSync("git", ["commit", "-q", "--allow-empty", "-m", "work"], { cwd: repo });
+	setBoard(repo, boardWith("qa_passed", { qa_report: "docs/task/x/qa-20261026-0430-report-t.md" }));
+	setReport(repo, reportFor(repo, b));
+	const { code, stdout } = runHookWithRefs(repo, "dev", "0".repeat(40));
+	assert.equal(code, 0);
+	assert.match(stdout, /放行/u);
+});
+
+check("AC-4c 看板未达标时全零 sha 并不放行", () => {
+	const repo = makeLineageRepo();
+	const b = revParse(repo, "HEAD");
+	setBoard(repo, boardWith("testing", { qa_report: "docs/task/x/qa-20261026-0430-report-t.md" }));
+	setReport(repo, reportFor(repo, b));
+	const { code, stderr } = runHookWithRefs(repo, "dev", "0".repeat(40));
+	assert.equal(code, 1);
+	assert.match(stderr, /qa_passed|user_signed/u);
+});
+
+check("AC-4d qa_report 指向他任务目录 → 拒绝（归属校验）", () => {
+	const repo = makeLineageRepo();
+	const b = revParse(repo, "HEAD");
+	execFileSync("git", ["commit", "-q", "--allow-empty", "-m", "work"], { cwd: repo });
+	const localSha = revParse(repo, "HEAD");
+	// 报告实际放在别的任务目录
+	fs.mkdirSync(path.join(repo, "docs", "task", "other"), { recursive: true });
+	fs.writeFileSync(
+		path.join(repo, "docs", "task", "other", "qa-20261026-0430-report-t.md"),
+		reportFor(repo, b),
+	);
+	setBoard(repo, boardWith("qa_passed", { qa_report: "docs/task/other/qa-20261026-0430-report-t.md" }));
+	const { code, stderr } = runHookWithRefs(repo, "dev", localSha);
+	assert.equal(code, 1);
+	assert.match(stderr, /qa_report|本任务目录/u);
+});
+
+check("AC-4e 报告基线 commit 缺失 → 拒绝（不静默放行）", () => {
+	const repo = makeLineageRepo();
+	execFileSync("git", ["commit", "-q", "--allow-empty", "-m", "work"], { cwd: repo });
+	const localSha = revParse(repo, "HEAD");
+	setBoard(repo, boardWith("qa_passed", { qa_report: "docs/task/x/qa-20261026-0430-report-t.md" }));
+	setReport(repo, GOOD_REPORT.replace("| 基线 commit | `abc123def456789012345678901234567890abcd` |\n", ""));
+	const { code, stderr } = runHookWithRefs(repo, "dev", localSha);
+	assert.equal(code, 1);
+	assert.match(stderr, /基线/u);
+});
+
+check("AC-4f 报告不合格（SKIP 毒报告）→ 拒绝", () => {
+	const repo = makeLineageRepo();
+	const b = revParse(repo, "HEAD");
+	execFileSync("git", ["commit", "-q", "--allow-empty", "-m", "work"], { cwd: repo });
+	const localSha = revParse(repo, "HEAD");
+	setBoard(repo, boardWith("qa_passed", { qa_report: "docs/task/x/qa-20261026-0430-report-t.md" }));
+	setReport(repo, TOXIC_REPORT.replace("abc123def456789012345678901234567890abcd", b));
+	const { code, stderr } = runHookWithRefs(repo, "dev", localSha);
 	assert.equal(code, 1);
 	assert.match(stderr, /未全绿/u);
 });
 
-check("AC-6 报告全绿但看板 testing 拒绝", () => {
-	const repo = makeFakeRepo();
+check("AC-4g 缺 qa_report 字段 → 拒绝（stderr 含 qa_report）", () => {
+	const repo = makeLineageRepo();
+	execFileSync("git", ["commit", "-q", "--allow-empty", "-m", "work"], { cwd: repo });
+	const localSha = revParse(repo, "HEAD");
+	setBoard(repo, boardWith("qa_passed"));
 	setReport(repo, GOOD_REPORT);
-	setBoard(repo, "testing");
-	const { code, stderr } = runHook(repo, "dev");
+	const { code, stderr } = runHookWithRefs(repo, "dev", localSha);
 	assert.equal(code, 1);
-	assert.match(stderr, /testing/u);
+	assert.match(stderr, /qa_report/u);
 });
 
-check("AC-7 QA 全绿 + qa_passed 放行", () => {
-	const repo = makeFakeRepo();
-	setReport(repo, GOOD_REPORT);
-	setBoard(repo, "qa_passed");
-	const { code, stdout } = runHook(repo, "dev");
-	assert.equal(code, 0);
-	assert.match(stdout, /qa_passed/u);
-});
-
-check("AC-7b QA 全绿 + user_signed 放行", () => {
-	const repo = makeFakeRepo();
-	setReport(repo, GOOD_REPORT);
-	setBoard(repo, "user_signed");
-	const { code } = runHook(repo, "dev");
-	assert.equal(code, 0);
-});
-
-check("AC-9 SKIP 毒报告拒绝", () => {
-	const repo = makeFakeRepo();
-	setReport(repo, TOXIC_REPORT, "0500");
-	setBoard(repo, "qa_passed");
-	const { code, stderr } = runHook(repo, "dev");
+check("AC-4h 看板状态 testing（未达 qa_passed）→ 拒绝", () => {
+	const repo = makeLineageRepo();
+	const b = revParse(repo, "HEAD");
+	execFileSync("git", ["commit", "-q", "--allow-empty", "-m", "work"], { cwd: repo });
+	const localSha = revParse(repo, "HEAD");
+	setBoard(repo, boardWith("testing", { qa_report: "docs/task/x/qa-20261026-0430-report-t.md" }));
+	setReport(repo, reportFor(repo, b));
+	const { code, stderr } = runHookWithRefs(repo, "dev", localSha);
 	assert.equal(code, 1);
-	assert.match(stderr, /未全绿/u);
+	assert.match(stderr, /testing|qa_passed/u);
+});
+
+check("AC-4i 祖先链有效 + 看板 user_signed → 放行", () => {
+	const repo = makeLineageRepo();
+	const b = revParse(repo, "HEAD");
+	execFileSync("git", ["commit", "-q", "--allow-empty", "-m", "work"], { cwd: repo });
+	const localSha = revParse(repo, "HEAD");
+	setBoard(repo, boardWith("user_signed", { qa_report: "docs/task/x/qa-20261026-0430-report-t.md" }));
+	setReport(repo, reportFor(repo, b));
+	const { code } = runHookWithRefs(repo, "dev", localSha);
+	assert.equal(code, 0);
+});
+
+// ── AC-5/6 自举豁免（release_gate=exempt）──────────────────────────────────
+
+const BOARD_EXEMPT = (reason, decisions) => `# 任务看板：自举
+
+## 2. 状态
+
+| 字段 | 值 |
+|---|---|
+| 当前状态 | \`implementing\` |
+| release_gate | \`exempt(${reason})\` |
+
+## 5. 决策记录
+
+| 时间 | 议题 | 裁决 | 落点 |
+|---|---|---|---|
+${decisions}
+`;
+
+console.log("\n[AC-5 自举豁免放行 / AC-6 豁免边界]");
+
+check("AC-5 exempt(bootstrap-fix) + 决策记录含 V-1 → 放行且 stdout 含审计行", () => {
+	const repo = makeFakeRepo();
+	setBoard(repo, BOARD_EXEMPT("bootstrap-fix", "| `05:00` | 写通道 | 成立 | `arch-20261026-0536-verdict-1.md` |"));
+	const { code, stdout } = runHookWithRefs(repo, "dev");
+	assert.equal(code, 0);
+	assert.match(stdout, /release_gate=exempt\(bootstrap-fix\)/u);
+});
+
+check("AC-6a exempt() 空 reason → 拒绝", () => {
+	const repo = makeFakeRepo();
+	setBoard(repo, BOARD_EXEMPT("", "| `05:00` | 写通道 | 成立 | `V-1` |"));
+	const { code, stderr } = runHookWithRefs(repo, "dev");
+	assert.equal(code, 1);
+	assert.match(stderr, /release_gate|格式非法/u);
+});
+
+check("AC-6b reason 含空格（非法字符）→ 拒绝", () => {
+	const repo = makeFakeRepo();
+	setBoard(repo, boardWith("qa_passed"));
+	// boardWith 不支持含空格值，这里直接写文件
+	fs.writeFileSync(path.join(repo, "docs", "task", "x", "board.md"),
+		`# 任务看板\n\n## 2. 状态\n\n| 字段 | 值 |\n|---|---|\n| 当前状态 | \`qa_passed\` |\n| release_gate | \`exempt(a b)\` |\n\n## 5. 决策记录\n\n| 时间 | 议题 | 裁决 | 落点 |\n|---|---|---|---|\n| \`05:00\` | 写通道 | 成立 | \`V-1\` |\n`);
+	const { code, stderr } = runHookWithRefs(repo, "dev");
+	assert.equal(code, 1);
+	assert.match(stderr, /格式非法/u);
+});
+
+check("AC-6c exempt 有 reason 但决策记录无裁决引用 → 拒绝", () => {
+	const repo = makeFakeRepo();
+	setBoard(repo, BOARD_EXEMPT("bootstrap-fix", "| `05:00` | 写通道 | 先斩后奏 | `docs/task/x/board.md` |"));
+	const { code, stderr } = runHookWithRefs(repo, "dev");
+	assert.equal(code, 1);
+	assert.match(stderr, /决策记录/u);
 });
 
 // ── 汇总 ───────────────────────────────────────────────────────────────────
