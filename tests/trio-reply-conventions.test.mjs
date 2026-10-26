@@ -124,27 +124,11 @@ check("AC-1i 含轮次约定句 -第<N>轮 与目录命名形态", () => {
 	assert.ok(C.includes("qa-*-report-*.md"), "缺 QA 报告命名形态（AC-8a 优先级表述）");
 });
 
-check("AC-1j 含围栏外红色告警渲染规则：红色表述 + \\textcolor{red 标记", () => {
+check("AC-1j 三标记口径（verdict-2）：红色 / \\textcolor{red / 围栏外 齐备", () => {
 	const section = C.split("## 5.")[1].split("## 6.")[0];
-	assert.ok(section.includes("红色") || section.includes("标红"), "§5 缺红色/标红表述");
+	assert.ok(section.includes("红色"), "§5 缺「红色」表述");
 	assert.ok(section.includes("\\textcolor{red}"), "§5 缺 \\textcolor{red} 渲染标记");
 	assert.ok(section.includes("围栏外"), "§5 未规定告警行在围栏外");
-});
-
-check("AC-1j 追加：AC-1j 契约红字面量「标红」与附录 A 用词（红色）矛盾 → contract-gap 记录（同 B-2 通道，归 ARCH 裁决）", () => {
-	const spec = fs.readFileSync(
-		path.join(ROOT, "docs", "task", "TASK-003-2026-10-26-回复规范落地", "arch-20261026-1248-spec.md"),
-		"utf8",
-	);
-	// spec AC-1j 要求字面 `标红`，而 spec 附录 A 全文（逐字基准）用「红色」；
-	// 落地件按附录 A「红色」+ \textcolor{red 渲染（本文件 L68 命中），字面 `标红` 无法满足。
-	// 按契约缺口记录，不改 arch-*.md。
-	const contradicted = !C.includes("标红") && spec.includes("AC-1j 含标红渲染规则：`标红`");
-	console.log(`      [contract-gap] AC-1j 契约表述与附录 A 逐字基准冲突 = ${contradicted}`);
-	assert.ok(
-		C.includes("\\textcolor{red}"),
-		"落地件红色渲染能力缺失（如连渲染能力都没有则为真缺陷，非口径差）",
-	);
 });
 
 check("AC-1 附加：文档 ≤ 300 行（spec §5 非功能约束）", () => {
@@ -326,8 +310,8 @@ check("AC-10a 旧名目录不存在（无 2026-10-26- 前缀目录）", () => {
 	assert.deepEqual(remaining, [], `残留旧名目录 ${JSON.stringify(remaining)}`);
 });
 
-check("AC-10b 全仓 *.md 旧路径字符串命中清单（严格口径归 ARCH 裁决，B-2 扩展）", () => {
-	const violations = [];
+check("AC-10b 豁免外旧路径字符串为 0（verdict-1 记录类豁免）", () => {
+	const hits = [];
 	const walk = (dir) => {
 		for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
 			if (entry.name === "node_modules" || entry.name === ".git") continue;
@@ -337,23 +321,27 @@ check("AC-10b 全仓 *.md 旧路径字符串命中清单（严格口径归 ARCH 
 			} else if (entry.isFile() && entry.name.endsWith(".md")) {
 				const body = fs.readFileSync(full, "utf8");
 				const count = body.split("docs/task/2026-10-26-").length - 1;
-				if (count > 0) violations.push(`${path.relative(ROOT, full)} ×${count}`);
+				if (count > 0) hits.push(`${path.relative(ROOT, full)} ×${count}`);
 			}
 		}
 	};
 	walk(ROOT);
-	const specSelf = violations.filter((v) => v.includes("arch-20261026-1248-spec.md"));
-	const devReleased = violations.filter((v) => v.includes("dev-20261026-1346-release.md"));
-	const others = violations.filter(
-		(v) => !v.includes("arch-20261026-1248-spec.md") && !v.includes("dev-20261026-1346-release.md"),
-	);
+	// V-1 记录类豁免（spec v4 AC-10b）：定义举例与历史审计引用属合法说明。
+	const exempt = (rel) => {
+		if (/docs\/task\/[^/]+\/(arch|dev|qa)-.+\.md$/.test(rel)) return true;
+		if (/docs\/task\/[^/]+\/board\.md$/.test(rel)) return true;
+		if (rel.startsWith("docs/architecture/")) return true;
+		return false;
+	};
+	const violating = hits.filter((entry) => !exempt(entry.split(" ")[0]));
 	assert.deepEqual(
-		others,
+		violating,
 		[],
-		`spec/dev 报告之外的 *.md 含旧路径字符串 ${JSON.stringify(others)}`,
+		`豁免类之外的 *.md 含旧路径字符串 ${JSON.stringify(violating)}`,
 	);
-	console.log("      [contract-gap B-2 主记录] spec 自身命中：" + JSON.stringify(specSelf));
-	console.log("      [contract-gap B-2 扩展候选] DEV 交付说明命中：" + JSON.stringify(devReleased));
+	if (hits.length > 0) {
+		console.log("      [信息性] 记录类豁免命中（合法）：", JSON.stringify(hits));
+	}
 });
 
 check("AC-10c 清扫 diff 无结论/断言/时间戳/状态值变更（改名 commit 前后 AC 验证列不变）", () => {
