@@ -110,31 +110,5 @@ deny qa .omp/hooks/**
 deny arch bin/**
 deny qa bin/**
 
-# ── BEGIN TASK-002 临时写通道（arch-20261026-0536-verdict-2.md / ADR-0003）──
-# 回收条件：TASK-002 看板推进到 user_signed 后，用户 MUST 整段删除
-# BEGIN/END 之间内容，并把上方四条角色级 deny 恢复为：
-#   deny * .omp/hooks/**
-#   deny * bin/**
-# 回收动作记入看板决策记录；QA 按 spec AC-12 核验。
-allow dev .omp/hooks/pre/trio-guard.ts
-allow dev templates/pre-push
-allow dev templates/board.template.md
-allow dev bin/trio-selftest.sh
-allow dev bin/init-agent.sh
-# ── END TASK-002 临时写通道 ────────────────────────────────────────────
-
-# ── BEGIN TASK-003 临时写通道（ADR-0004 / ADR-0005 / arch-20261026-1248-spec.md §7）──
-# 回收条件：TASK-003 看板推进到 user_signed 后，用户 MUST 整段删除
-# BEGIN/END 之间内容（fail-closed 自动恢复），回收动作记入看板决策记录，
-# QA 按 AC-9 核验。与 TASK-002 窗口独立、并存、各自回收。
-allow dev docs/REPLY-CONVENTIONS.md
-allow dev profiles/arch.rules.md
-allow dev profiles/dev.rules.md
-allow dev profiles/test.rules.md
-allow dev .omp/trio/arch.rules.md
-allow dev .omp/trio/dev.rules.md
-allow dev .omp/trio/test.rules.md
-allow dev templates/report.template.md
-allow dev templates/board.template.md
-allow dev bin/trio-check-report.mjs
-# ── END TASK-003 临时写通道 ────────────────────────────────────────────
+deny * .omp/hooks/**
+deny * bin/**
