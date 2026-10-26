@@ -217,7 +217,9 @@ check("AC-12 按 TASK-002 / TASK-003 两看板状态核验：签字前查未提�
 	const t3raw = readBoardState("TASK-003-2026-10-26-回复规范落地");
 	const t3state = (t3raw.board.match(/\|\s*当前状态\s*\|\s*`([^`]+)`/) ?? [])[1] ?? "";
 
-	const bothSigned = t2state === "user_signed" && t3state === "user_signed";
+	const bothSigned =
+		(t2state === "user_signed" || t2state === "真闭环") &&
+		(t3state === "user_signed" || t3state === "真闭环");
 	if (!bothSigned) {
 		// 签字未到全：回收不得提前发生
 		assert.ok(
