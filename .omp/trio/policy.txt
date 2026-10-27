@@ -65,6 +65,7 @@ allow * .github/workflows/*
 # ─────────────────────────────────────────────────────────────────────────────
 allow arch docs/task/*/arch-*.md
 allow arch docs/architecture/**
+allow arch templates/*.template.md
 
 # 硬红线：契约发布者不得碰实现与测试（改这两处等于自己给自己判卷）
 deny arch src/**
