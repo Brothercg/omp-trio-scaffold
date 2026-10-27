@@ -13,6 +13,17 @@ trio-selftest --fast     # 在项目根执行，确认门禁已装好
 
 `trio-selftest --fast` 必须全绿再开会话 —— 门禁没生效时开三个 agent 是危险的。
 
+### 0.1 命令速查
+
+| 命令 | 作用 | 何时用 |
+|---|---|---|
+| `trio-init` | 初始化当前项目：注入角色简报、写策略、hooks、门禁与测试 | 每项目一次；`--force` 覆盖重装 |
+| `trio-start <arch\|dev\|qa>` | 以指定角色前台启动 omp | 每开一个角色一次 |
+| `trio-tmux` | 单窗口三分屏并行起三个角色 | 方式 B |
+| `trio-selftest --fast` | 门禁回归自检 | 开会话前 / 改门禁后 |
+
+未初始化项目跑 `trio-start` 会报「找不到角色简报」——先 `trio-init` 即可。
+
 ---
 
 ## 1. 模型：默认 `deepseek/deepseek-v4.1-flash`
@@ -65,7 +76,7 @@ trio-tmux --model claude-sonnet-5
 最通用，SSH、VS Code 终端、裸 tty 都一样。**一个终端对应一个 omp 进程**，
 `TRIO_ROLE` 只作用于该进程。
 
-### 0.1 只跑一个角色（不并行）
+### 2.1 只跑一个角色（不并行）
 
 ```bash
 cd ~/projects/my-app
@@ -83,7 +94,7 @@ trio-start qa
 > `trio-start` 内部的 `exec omp` 替换的是**脚本自身**的进程，不是你的交互 shell。
 > 所以退出 omp 后终端不会关闭，提示符还在，无需重开窗口。
 
-### 0.2 三个角色并行
+### 2.2 三个角色并行
 
 开三个终端，各自 `cd` 到同一项目目录，各跑一个角色：
 
@@ -98,7 +109,7 @@ trio-start qa
 - 不要在同一个 shell 里后台并行跑多个 omp：`TRIO_ROLE` 是进程环境变量，
   会互相覆盖身份。**必须分进程**。
 
-### 0.3 会话名自动同步为角色
+### 2.3 会话名自动同步为角色
 
 `.omp/extensions/trio-session-name.ts` 在 `session_start` 时把 omp 会话名设为
 `TRIO_ROLE`（`arch` / `dev` / `qa`）。走进程内扩展，不经过终端按键，因此没有
@@ -138,7 +149,7 @@ tmux select-pane -t trio-my-app:trio.0
 tmux attach -t trio-my-app
 ```
 
-### 0.4 布局
+### 3.1 布局
 
 | `--layout` | 排列 | 几何 | 适合 |
 |---|---|---|---|
@@ -148,7 +159,7 @@ tmux attach -t trio-my-app
 布局由你按屏幕方向自己选，脚本不自动推断（`tmux new-session -d` 创建时拿到的是
 服务端 80×24 默认尺寸，量不到真实屏幕，猜出来是错的）。
 
-### 0.5 参数
+### 3.2 参数
 
 | 参数 | 说明 |
 |---|---|
@@ -160,7 +171,7 @@ tmux attach -t trio-my-app
 | `--force` | 会话已存在时先 kill 重建 |
 | `--no-remain` | pane 退出后立即关闭（默认失败时保留 pane，便于看报错） |
 
-### 0.6 常用组合
+### 3.3 常用组合
 
 ```bash
 # 竖屏
@@ -177,7 +188,7 @@ trio-tmux --force --model claude-opus-5
 trio-tmux --project ~/projects/other-app --session trio-other
 ```
 
-### 0.7 操作要点
+### 3.4 操作要点
 
 | 操作 | 按键 |
 |---|---|
@@ -215,7 +226,7 @@ cp .omp/trio/templates/board.template.md docs/task/2026-10-25-登录改造/board
 
 ---
 
-## 1. 4.5 发布与 push（ADR-0001）
+## 4.5 发布与 push（ADR-0001）
 
 三色会话中：
 
@@ -228,7 +239,7 @@ cp .omp/trio/templates/board.template.md docs/task/2026-10-25-登录改造/board
   的写入权已从公共维护区收窄到 **dev 独占**；qa / arch 越写会被
   pre-commit / trio-guard 拒绝。
 
-### 1.1 角色 × 发布链矩阵
+### 4.5.1 角色 × 发布链矩阵
 
 | 动作 | arch | dev | qa | 用户（无角色） | 拦截层 |
 |---|---|---|---|---|---|
@@ -258,7 +269,8 @@ cp .omp/trio/templates/board.template.md docs/task/2026-10-25-登录改造/board
 ## 5. 常见问题
 
 **`trio-start: 找不到角色简报`**
-项目没初始化，或初始化不完整。在项目根执行 `trio-init --force`。
+项目没初始化，或初始化不完整。在项目根执行 `trio-init`（首次）或
+`trio-init --force`（覆盖修复）。
 
 **`trio-tmux: 会话已存在`**
 用 `tmux attach -t <会话名>` 接入旧会话，或 `--force` 重建。
