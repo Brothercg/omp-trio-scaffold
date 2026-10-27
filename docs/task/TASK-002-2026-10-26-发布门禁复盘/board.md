@@ -3,7 +3,7 @@
 <!--
 落位：docs/task/TASK-002-2026-10-26-发布门禁复盘/board.md
 本任务由 DEV 发起：复盘 TASK-001（v0.2.0）发布过程中暴露的门禁契约缺口。
-当前状态为 testing：DEV 已按 spec v2 完成实现，交 QA 验证 AC-1~AC-12。
+最终状态 `user_signed`（终验 14:33）；§4 B-1..B-6 已于归档回收（2026-10-27）标关闭。
 -->
 
 ## 1. 标识
@@ -51,18 +51,18 @@
 
 | 编号 | 类型 | 描述 | 提出 | 待谁 | 起始时间 |
 |---|---|---|---|---|---|
-| B-1 | `contract-gap` | bash 门禁把 `bun tests/...`、`grep tests/...`、`git add -- ...` 判为写入并拒绝；同时 `--pathspec-from-file` 可绕过文本匹配 | `DEV` | `ARCH` | `04:50` |
-| B-2 | `contract-gap` | 自举 / 维护任务无法产出 `qa-*-report-*.md`，pre-push 的 dev 分支永远 exit 1，只能 `unset TRIO_ROLE` 人工放行 | `DEV` | `ARCH` | `04:50` |
-| B-3 | `contract-gap` | `profiles/*.rules.md` 与 `.omp/trio/*.rules.md` 双份维护，无相等断言；本次发布前已漂移而 111 项测试仍绿 | `DEV` | `ARCH` | `04:50` |
-| B-4 | `contract-gap` | `trio-selftest.sh` 硬编码 3 个 suite，未跑 `trio-pre-push.test.mjs`；`init-agent.sh` 也只部署 3 个测试 | `DEV` | `ARCH` | `04:50` |
-| B-5 | `contract-gap` | 无 `CHANGELOG.md` / `VERSION` / `package.json`；版本号只在 README 散文与 tag 中，发布靠手工 | `DEV` | `ARCH` | `04:50` |
-| B-6 | `contract-gap` | pre-push 的报告 glob 是全仓库、看板取 mtime 最新；放行证据未绑定待推任务 / 提交，旧报告可放行新推送 | `DEV` | `ARCH` | `04:50` |
+| B-1 | `已关闭`（归档回收 2026-10-27） | bash 门禁把 `bun tests/...`、`grep tests/...`、`git add -- ...` 判为写入并拒绝；同时 `--pathspec-from-file` 可绕过文本匹配。→ 已被 G-1a/1c 吸收（V-1 判定成立 → AC-1/2/3 实现验证通过） | `DEV` | `—` | `04:50` |
+| B-2 | `已关闭`（归档回收 2026-10-27） | 自举 / 维护任务无法产出 `qa-*-report-*.md`，pre-push 的 dev 分支永远 exit 1，只能 `unset TRIO_ROLE` 人工放行。→ 已被 G-2 吸收（V-1 → AC-5/6 豁免放行通过） | `DEV` | `—` | `04:50` |
+| B-3 | `已关闭`（归档回收 2026-10-27） | `profiles/*.rules.md` 与 `.omp/trio/*.rules.md` 双份维护，无相等断言；本次发布前已漂移而 111 项测试仍绿。→ 已被 G-3 吸收（V-1 → AC-7 相等断言入 `trio-gate-contract`，通过） | `DEV` | `—` | `04:50` |
+| B-4 | `已关闭`（归档回收 2026-10-27） | `trio-selftest.sh` 硬编码 3 个 suite，未跑 `trio-pre-push.test.mjs`；`init-agent.sh` 也只部署 3 个测试。→ 已被 G-4 吸收（V-1 → selftest glob 全套件 + init-agent 全测试部署，已修） | `DEV` | `—` | `04:50` |
+| B-5 | `已关闭`（归档回收 2026-10-27） | 无 `CHANGELOG.md` / `VERSION` / `package.json`；版本号只在 README 散文与 tag 中，发布靠手工。→ 已被 G-5 吸收（CHANGELOG.md 已建；V-4 裁定「版本号以 git tag 为准」，AC-9r 通过） | `DEV` | `—` | `04:50` |
+| B-6 | `已关闭`（归档回收 2026-10-27） | pre-push 的报告 glob 是全仓库、看板取 mtime 最新；放行证据未绑定待推任务 / 提交，旧报告可放行新推送。→ 已被 G-6 吸收（V-1 → AC-4 证据绑定，9 条对抗通过） | `DEV` | `—` | `04:50` |
 | B-7 | `已解决` | spec §8 分给 DEV 的 5 个文件被 policy 拒绝。V-2 裁决经任务级临时写通道放行（ADR-0003）；policy 窗口已由用户授权、ARCH 代落（commit `3fb519a`）。DEV 重启会话后开工 | `DEV` | `ARCH`（已处置） | `05:19` |
 | B-8 | `已解决` | 旧会话 policy 缓存问题已由用户重启解决；guard 实测允许写窗口文件，实现完成 | `DEV` | 用户（已处置） | `06:04` |
 | B-9 | `已解决` | AC-9r：README 版本行未标注「版本号以 git tag 为准」。**V-4 裁决：实现缺口（非契约过严）**——AC-9 措辞是单一真值源最小闭环；README L7 标注已由 ARCH 落盘（公共维护区，不占写窗口），spec v2 不动。QA 第 2 轮复测 AC-9r | `QA` | `ARCH`（已处置） | `10:23` |
 | B-10 | `已裁决` | AC-1 对抗边界：QA 会话内 `bun <脚本> --help` / `selftest --fast` 被拦 3 次。**V-4 裁决：观察成立、归因不成立，不立 BUG-003**——白盒对照实验证实 HEAD（9d97a10）对 `bun`/`bash` 不产出写目标（12 例全 pass），逐字复现 QA 报错的是 ecb0470 旧版 guard；机制 = 旧会话驻留代码（与 B-8 同类，滞留的是代码非 policy）。处置：QA 重启会话后复测 AC-1 边界；门禁变更后三会话必须重启再验收 | `QA` | `ARCH`（已处置） | `10:23` |
 
-> 连续 3 轮未全绿 → 停手并在此记 `blocked` 四项。本任务尚无实现轮次。
+> 连续 3 轮未全绿 → 停手并在此记 `blocked` 四项。
 
 ## 5. 决策记录
 

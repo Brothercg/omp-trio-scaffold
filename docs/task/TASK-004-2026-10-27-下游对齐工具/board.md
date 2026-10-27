@@ -86,6 +86,7 @@
 
 | 时间 | 议题 | 裁决 | 落点 |
 |---|---|---|---|
+| `11:51` | AC-9 验收链口径（归档后补裁 V-3） | 判 `契约缺陷`（口径欠明）：「干净 HEAD ……selftest 全绿」字面不可满足（部署产物不入 git，selftest `[1/8]` 必红，已实测）。裁定「两树两证」：证1 干净树 `--check`/`cmp` exit 0；证2 init 后工作树 selftest 全绿；报告逐证写明树边界。spec v3→v4；实现/测试零改动；QA 第 3 轮结论维持有效 | `arch-20261027-1151-verdict-2.md`、spec v4 |
 | `11:35` | TASK-004 v0.4.0 发布 | push `2ca27dd` → `origin/main`；tag `v0.4.0`；`trio-align` 13/0、selftest 20/0、`--check` aligned；TASK-004 职责流终结 | `dev-20261027-1135-release.md`、tag `v0.4.0` |
 | `10:57` | V-2 三态定音 + 处置修正 | GR-2 三态裁定①仅脚手架仓运行（②`TRIO_UPSTREAM_POLICY`/③`--upstream-policy` 否决：第二真值源入口 + 版本漂移；未来需要先立 ADR-0010）。QA AC-6 实测 ALIGN-DEPLOYED 与「不部署」相抵 → init-agent.sh 移除部署行（用户落盘） | `arch-20261027-1046-verdict-1.md` §3 补录/§4 修正 |
 | `10:46` | GR-1/GR-2 contract-gap 联裁决 | 均判 `契约缺陷`：V-1 选 A（夹具正交于被测语义——改夹具不改约束）；V-2 单真值源定位（不加参数注入）。spec v2→v3（AC-4/AC-5 重写 + §2 运行形态）；实现零改动 | `arch-20261027-1046-verdict-1.md`、spec v3 |

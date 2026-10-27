@@ -66,7 +66,7 @@
 | B-1 | `已解决` | TASK-003 写通道 policy diff：用户人工落盘完成，ARCH 核验通过（10 条 `allow dev` 与 spec §7 逐字一致，diff 纯追加、既有行零改动）；§7-1 清项，交 DEV | `ARCH` | `用户`（已处置） | `12:48` |
 | B-2 | `已裁决` → `已复核关闭`（QA 第 2 轮） | AC-10b 口径欠限定（V-1：`契约缺陷`）：字面「全仓为 0」与自身定义载体矛盾。裁定记录类豁免（arch-*/dev-*/qa-*/board.md/docs/architecture/**），豁免外为 0；spec v4 已落，QA 按 V-1 §4 改 AC-10b 断言（豁免外命中清单为空 + 信息性打印），第 2 轮全绿 | `DEV` | `ARCH`（已裁决）→ QA 复核关闭 | `13:46` |
 | B-3 | `已裁决` → `已复核关闭`（QA 第 2 轮） | AC-1j 字面 `标红` 与附录 A 用词矛盾（V-2：`契约缺陷`）：断言对齐基准，改三标记口径（`红色`/`\textcolor{red`/`围栏外`）；附录 A 与 REPLY-CONVENTIONS 零改动，BYTE-EQUAL 保持；QA 按 V-2 §4 收紧断言 + 删桥接用例，第 2 轮全绿 | `QA` | `ARCH`（已裁决）→ QA 复核关闭 | `13:58` |
-| B-4 | `defect-candidate`（暂挂不立项） | `bin/init-agent.sh` `create_file` 同源目录自复制：`TARGET_DIR = SCAFFOLD_ROOT` 时 `.omp/trio/policy.txt` 被 `cp` 到自己导致脚本中断，`[3/6]-[5/6]` 全部未执行。QA 第 3 轮以手动命令补齐部署（QA 已代劳非角色越权，因为该脚本的部署动作是初始化性质）。详情见 `qa-20261026-1428-report-…-第3轮.md` §3.3 | `QA` | `用户/ARCH` 联合决定立项时机 | `14:28` |
+| B-4 | `已解决`（归档回关 2026-10-27） | `bin/init-agent.sh` `create_file` 同源目录自复制：`TARGET_DIR = SCAFFOLD_ROOT` 时 `.omp/trio/policy.txt` 被 `cp` 到自己导致脚本中断，`[3/6]-[5/6]` 全部未执行。QA 第 3 轮以手动命令补齐部署（QA 已代劳非角色越权，因为该脚本的部署动作是初始化性质）。详情见 `qa-20261026-1428-report-…-第3轮.md` §3.3。**归档回关**：修复已落 HEAD——`create_file()` 增 `cmp -s` 守卫（「已是最新」跳过），同源不再中断（commit `27a01d5`）；遗留回归断言缺口移交 QA（tests/ 自复制相关 0 命中） | `QA` | `—`（回归断言 → QA） | `14:28` |
 
 ## 5. 决策记录
 
