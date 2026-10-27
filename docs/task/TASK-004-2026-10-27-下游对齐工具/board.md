@@ -15,16 +15,16 @@
 
 | 字段 | 值 |
 |---|---|
-| 当前状态 | `waiting_user` |
+| 当前状态 | `testing` |
 | 最后推进人 | `DEV` |
-| 最后更新 | `2026-10-27 10:02` |
+| 最后更新 | `2026-10-27 10:05` |
 
 ### 处置流程
 
 | 阶段 | 状态 | 轮次 |
 |---|---|---|
 | ① ARCH 设计（契约定稿） | done | spec v1 |
-| ② DEV 开发 | blocked | 第 1 轮：实现完成，待用户落盘/提交 |
+| ② DEV 开发 | done | 第 1 轮：落盘 `27a01d5`，自测全绿 |
 | ③ QA 测试 | 待办 | — |
 | ④ 闭环（user_signed + 挂起清单清零） | 待办 | — |
 
@@ -32,6 +32,8 @@
 - 第 0 轮 09:47：grill-me 对齐会话 downstream-adapt 7 问全解 → ADR-0006/0007 用户审核通过 → TASK-004 立项，spec v1 定稿，② 交 DEV 开工
 - 第 1 轮 10:02：DEV 完成 trio-align/init-agent U1/test/README 实现与自测（align 12/0、临时自证 aligned）；
   `bin/**`、`tests/**` 无写通道，交付 patch 待用户落盘；GR-1/GR-2 报 ARCH
+- 第 1 轮 10:05：用户无角色落盘 `27a01d5`；DEV 复跑 align 12/0、`--check` aligned、
+  `trio-selftest --fast` 20/0；② done，③ 交 QA
 
 ②⇄③ 回环即迭代；轮次口径 = 3 轮熔断定义（「QA 判未通过 → DEV 修 → QA 复测」计 1 轮）。
 
@@ -41,37 +43,44 @@
 
 | AC | 契约定稿 | 实现 | 验证 | 状态 |
 |---|---|---|---|---|
-| AC-1 `--check` 对齐判定 | ✅ | ✅ staging | ☐ | 待落盘/QA |
-| AC-2 `--check` 差异检出 | ✅ | ✅ staging | ☐ | 待落盘/QA |
-| AC-3 默认 dry-run 不落盘 | ✅ | ✅ staging | ☐ | 待落盘/QA |
-| AC-4 `--apply` 迁移与引用清扫 | ✅ | ✅ staging | ☐ | 待落盘/QA；GR-1 待裁决 |
-| AC-5 `--apply` 核验报告零越界 | ✅ | ✅ staging | ☐ | 待落盘/QA |
-| AC-6 升级分类覆盖（U1） | ✅ | ✅ staging | ☐ | 待落盘/QA |
-| AC-7 回归测试 | ✅ | ✅ staging 12/0 | ☐ | 待落盘/QA |
-| AC-8 文档落地 | ✅ | ✅ README §14 | ☐ | 待提交/QA |
-| AC-9 验收链自证 | ✅ | ☐ | ☐ | 待落盘后本仓复跑 |
+| AC-1 `--check` 对齐判定 | ✅ | ✅ | ☐ | 待 QA |
+| AC-2 `--check` 差异检出 | ✅ | ✅ | ☐ | 待 QA |
+| AC-3 默认 dry-run 不落盘 | ✅ | ✅ | ☐ | 待 QA |
+| AC-4 `--apply` 迁移与引用清扫 | ✅ | ✅ | ☐ | 待 QA；GR-1 待裁决 |
+| AC-5 `--apply` 核验报告零越界 | ✅ | ✅ | ☐ | 待 QA |
+| AC-6 升级分类覆盖（U1） | ✅ | ✅ | ☐ | 待 QA |
+| AC-7 回归测试 | ✅ | ✅ 12/0 | ☐ | 待 QA |
+| AC-8 文档落地 | ✅ | ✅ README §14 | ☐ | 待 QA |
+| AC-9 验收链自证 | ✅ | ✅ aligned + selftest 20/0 | ☐ | 待 QA |
 
 ## 4. 阻塞与待裁决
 
 | 编号 | 类型 | 描述 | 提出 | 待谁 | 起始时间 |
 |---|---|---|---|---|---|
-| B-1 | 流程 | `bin/**`、`tests/**` 对 DEV 为 `deny *`，TASK-004 无临时写通道；实现已打成 patch/附件，待用户无角色落盘并提交三个受保护文件 | DEV | 用户 | `2026-10-27 10:02` |
 | B-2 | 契约 | GR-1：AC-2 policy diff 与 AC-4 `--apply` 后 `--check` 0、AC-5 零越界冲突；GR-2：`trio-align.sh` 上游 policy 定位未定义 | DEV | ARCH | `2026-10-27 10:02` |
 
 ## 5. 决策记录
 
 | 时间 | 议题 | 裁决 | 落点 |
 |---|---|---|---|
+| `10:05` | B-1 落盘解除 | 用户无角色应用补丁并提交 `27a01d5`（三个受保护文件）；DEV 复跑 align 12/0、selftest 20/0 | `dev-20261027-1002-release.md` §3.4/§4 |
 | `09:47` | 下游适配策略（grill 7 问） | C+A：结构对齐 + 逃生舱；S1 标准=本项目；X3 迁移 dry-run；U1 升级分类覆盖；验收 = init ≤2 命令 + selftest 绿 + align 零差异 + policy cmp | `docs/architecture/ADR-0006-下游项目对齐策略.md`、`docs/architecture/ADR-0007-文档标题层级顺序编号.md` |
 
 ## 6. 交接备注
 
-② DEV 实现完成，但受门禁 `deny *` 限制未落盘。待用户：
-1. 按 `dev-20261027-1002-release.md` §4（或 `dev-20261027-1002-changes.md`）
-   应用 patch，提交 `bin/trio-align.sh`、`bin/init-agent.sh`、
-   `tests/trio-align.test.mjs`；
-2. 回报提交哈希。DEV 随后提交 README/交付说明，复跑 AC-9，推 ③ 交 QA。
-ARCH 需同时裁决 `dev-20261027-1002-bug-1.md` 的 GR-1/GR-2。
+② DEV done（落盘 `27a01d5`，README/docs `f0ca43b` + 本次补记）→ ③ QA。
+DEV 自测：`bun tests/trio-align.test.mjs` 12/0；`bin/trio-align.sh --check`
+`aligned`/exit 0；`bin/trio-selftest.sh --fast` 20/0。
+QA 重点：
+1. AC-1..AC-3/5/6/7/8/9 按 spec v1 复测；AC-3 必须断言 `git status --porcelain`
+   前后逐字节一致。
+2. **AC-4 先读 `dev-20261027-1002-bug-1.md` 的 GR-1**：DEV 实现不写 policy；
+   若用 AC-2 的 policy-diff 夹具，`--apply` 后 `--check` 必为 1。等 ARCH V-1
+   裁决测试口径；不要把该契约冲突记成实现缺陷。
+3. **GR-2**：`trio-align.sh` 部署进下游后上游 policy 自比问题；等 ARCH V-2。
+4. AC-6 已由 `tests/trio-align.test.mjs` 覆盖（执行件覆盖 + policy diff 保留）。
+5. 工作区有非本任务残留（`D docs/task/TRIO-SELFTEST/...`、`D src/trio_probe.py`、
+   `?? .omp/trio/templates/`），不要纳入本任务验收。
 
 ## 7. 挂起清单（SKIP/待解除）
 
