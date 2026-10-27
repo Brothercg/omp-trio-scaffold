@@ -592,3 +592,19 @@ cmp .omp/trio/policy.txt /path/to/project/.omp/trio/policy.txt
 
 四条全绿才算对齐完成。升级旧项目时重跑 `init-agent.sh`：执行件直接覆盖，
 `policy.txt` 有 diff 只提示、不覆盖。
+
+---
+
+## 15. 需求回流：下游 → 本仓（回流卡）
+
+下游项目使用中冒出**本仓当前版本满足不了**的新需求时，用**回流卡**把上下文带回本仓（不靠人脑搬运）：
+
+1. **触发**：下游任一角色说「回流需求」（dev / qa 触发先收集上下文交 ARCH）；**起草恒归 ARCH**。
+2. **填卡**：按 `.omp/trio/templates/backflow.template.md` 七段填写——一卡一需求；文件路径一律**绝对路径**；
+   版本用 `git -C ~/projects/omp-trio-scaffold describe --tags` 输出原样粘贴。
+3. **传递**：复制卡内正文粘贴进本仓会话，即开任务。
+
+- **自豁免**：本仓自身开发禁用回流卡——自己不返回自己。
+- **双轨**：回流卡独立于 `feedback/` 7-格反馈条目池，互不混用。
+- 契约：`docs/task/TASK-005-2026-10-27-下游上下文回流/arch-20261027-1940-spec.md`；
+  决策：`docs/architecture/ADR-0010-下游需求上下文回流机制.md`。
