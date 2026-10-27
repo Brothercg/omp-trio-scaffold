@@ -68,6 +68,7 @@
 |---|---|---|---|---|---|
 | B-2 | `已裁决` | GR-1/GR-2 均判 `契约缺陷`：V-1 选 A（AC-4 夹具改 policy 相等，policy diff 只由 AC-2 检出、人工同步后归零）；V-2 三态裁定①仅脚手架仓运行（②环境变量/③参数否决）。spec v2→v3；处置修正（10:57）：init-agent.sh 移除 trio-align 部署行（ALIGN-DEPLOYED 差异，用户落盘） | `DEV` | `ARCH`（已裁决） | `2026-10-27 10:02` |
 | B-3 | 实现（环境级） | 本仓 HEAD 残留 selftest probe 夹具 commits（37dc5af/d508032/266e905：TRIO-SELFTEST 报告 + `src/trio_probe.py`），干净 HEAD `--check` exit 1，阻塞 AC-9；修复 = git rm 两 probe 路径 + `src/` tracked 占位（QA 已在 simulated HEAD 验证归零）。第 2 轮 10:52 复核仍未修（`git ls-tree` 两 probe 路径仍在 HEAD）；**不熔断**（环境级阻塞，修复后第 3 轮复核） | QA | DEV/用户 | `2026-10-27 10:30` |
+| B-4 | 测试契约漂移 | ADR-0009 已允许 `arch` 写 `templates/*.template.md`，但 `tests/trio-guard.test.mjs` / `tests/trio-policy.test.mjs` 仍断言全角色拒绝 `templates/board.template.md`；`trio-selftest --fast` 18/2（guard 61/1、policy 129/1），阻塞 AC-9 全绿 | DEV | QA | `2026-10-27 11:01` |
 
 ## 5. 决策记录
 
@@ -115,3 +116,4 @@ policy 字节不变、人工同步后归零）+ AC-5 补 policy.txt 零写入双
 |---|---|---|---|
 | AC-9（B-3 未修） | 用户/DEV 无角色执行 `git rm -r docs/task/TRIO-SELFTEST src/trio_probe.py` + `src/` tracked 占位并提交（命令见 qa-20261027-1030-bug-1.md §4） | 用户 | QA 第 3 轮复核：干净 HEAD `--check` exit 0 + AC-9 行转「通过」；全矩阵绿 → ③ 状态 qa_passed |
 | GR-2 部署收尾（U1 覆盖范围修正） | DEV 按 spec v3 §2 从 `bin/init-agent.sh` 部署清单移除 `trio-align.sh`（不随下游部署） | DEV | QA 第 3 轮一并复核：部署产物中无 `bin/trio-align.sh`，AC-6 断言相应更新由 QA 实施 |
+| ADR-0009 测试同步（B-4） | QA 更新 `tests/trio-guard.test.mjs` / `tests/trio-policy.test.mjs`：`templates/*.template.md` 对 arch 放行、对 dev/qa 拒绝；`templates/pre-commit`/`pre-push` 保持全角色拒绝 | QA | 同步后 `trio-selftest --fast` 应全绿，AC-9 才可转通过 |
