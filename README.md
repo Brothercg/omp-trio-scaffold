@@ -548,3 +548,47 @@ meta 策略，但必须继续锁死 `policy.txt`、hook、报告校验器与 `bi
   缺失时不会报错，只是会话名保持 omp 默认；你 `/rename` 过的会话不会被改回角色名。
 - **tmux pane 标题是展示层**：边框上的 `ARCH`/`DEV`/`QA` 不影响门禁，
   真正决定权限的只有 `TRIO_ROLE`。
+
+---
+
+## 14. 下游适配
+
+下游项目朝脚手架标准布局对齐，使用 `bin/trio-align.sh`（bash ≥ 4 + git，
+不依赖 bun / node）。标准 = 本仓库当前结构：`docs/task/TASK-<NNN>-<YYYY-MM-DD>-<slug>/`、
+`docs/architecture/`、`src/`、`tests/`。
+
+### 14.1 三命令
+
+| 命令 | 行为 | 退出码 |
+|---|---|---|
+| `bin/trio-align.sh --check [目标]` | 只检测，不写工作树；零差异打印 `aligned` | `0` 零差异 / `1` 有差异 / `2` 参数或环境错误 |
+| `bin/trio-align.sh [目标]` | 默认 dry-run：打印将执行的操作，工作树零变化 | `0` |
+| `bin/trio-align.sh --apply [目标]` | 执行 `git mv` + 全仓文本引用清扫，输出逐行 diff 核验报告 | `0` 完成 / `2` 错误 |
+
+`目标` 缺省为 `$PWD`，且必须是 git 仓库根。`--map <from>:<to>` 可重复，
+用于覆盖固定别名（`lib/`→`src/`、`app/`→`src/`、`spec/`→`tests/`、
+`test/`→`tests/`、`doc/`→`docs/`、`arch/`→`docs/architecture/`）；
+显式映射优先于同名别名。`from` 必须存在、`to` 必须不存在，否则 exit 2。
+
+`--apply` 只迁移可判定的目录映射；遇到 `lib/` 与 `src/` 并存等半迁移状态，
+只报「需人工裁定」，不自动合并。迁移工具不迁 git 历史内的旧路径，只清工作树
+现存文本。
+
+### 14.2 逃生舱与 policy
+
+`.omp/trio/policy.txt` 是根信任，`trio-align.sh` 绝不自动覆盖。检测到目标
+policy 与上游逐字节不同时，`--check` 报 `policy` 差异行；`--apply` 不写该文件。
+若差异是**有意的下游方言**（逃生舱），必须在项目 `README.md` 或 board 标注
+原因；否则按 ADR-0006 §3.5，验收链要求 policy 与上游 `cmp` 逐字节相等。
+
+完整验收链：
+
+```bash
+bin/init-agent.sh /path/to/project
+bin/trio-selftest.sh --fast /path/to/project
+bin/trio-align.sh --check /path/to/project
+cmp .omp/trio/policy.txt /path/to/project/.omp/trio/policy.txt
+```
+
+四条全绿才算对齐完成。升级旧项目时重跑 `init-agent.sh`：执行件直接覆盖，
+`policy.txt` 有 diff 只提示、不覆盖。
