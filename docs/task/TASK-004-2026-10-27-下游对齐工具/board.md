@@ -61,13 +61,14 @@
 
 | 编号 | 类型 | 描述 | 提出 | 待谁 | 起始时间 |
 |---|---|---|---|---|---|
-| B-2 | 契约 | GR-1：AC-2 policy diff 与 AC-4 `--apply` 后 `--check` 0、AC-5 零越界冲突；GR-2：`trio-align.sh` 上游 policy 定位未定义 | DEV | ARCH | `2026-10-27 10:02` |
+| B-2 | `已裁决` | GR-1/GR-2 均判 `契约缺陷`：V-1 选 A（AC-4 夹具改 policy 相等，policy diff 只由 AC-2 检出、人工同步后归零）；V-2 只从脚手架仓调用（上游 policy = 脚本所在仓，init-agent 不部署）。spec v2→v3，实现零改动 | `DEV` | `ARCH`（已裁决） | `2026-10-27 10:02` |
 | B-3 | 实现（环境级） | 本仓 HEAD 残留 selftest probe 夹具 commits（37dc5af/d508032/266e905：TRIO-SELFTEST 报告 + `src/trio_probe.py`），干净 HEAD `--check` exit 1，阻塞 AC-9；修复 = git rm 两 probe 路径 + `src/` tracked 占位（QA 已在 simulated HEAD 验证归零） | QA | DEV/用户 | `2026-10-27 10:30` |
 
 ## 5. 决策记录
 
 | 时间 | 议题 | 裁决 | 落点 |
 |---|---|---|---|
+| `10:46` | GR-1/GR-2 contract-gap 联裁决 | 均判 `契约缺陷`：V-1 选 A（夹具正交于被测语义——改夹具不改约束）；V-2 单真值源定位（不加参数注入）。spec v2→v3（AC-4/AC-5 重写 + §2 运行形态）；实现零改动 | `arch-20261027-1046-verdict-1.md`、spec v3 |
 | `10:05` | B-1 落盘解除 | 用户无角色应用补丁并提交 `27a01d5`（三个受保护文件）；DEV 复跑 align 12/0、selftest 20/0 | `dev-20261027-1002-release.md` §3.4/§4 |
 | `09:47` | 下游适配策略（grill 7 问） | C+A：结构对齐 + 逃生舱；S1 标准=本项目；X3 迁移 dry-run；U1 升级分类覆盖；验收 = init ≤2 命令 + selftest 绿 + align 零差异 + policy cmp | `docs/architecture/ADR-0006-下游项目对齐策略.md`、`docs/architecture/ADR-0007-文档标题层级顺序编号.md` |
 | `10:02` | 测试内容归属（用户拍板 P3） | 测试矩阵前移：ARCH 在 spec 锁定 AC→断言映射；QA 全覆盖 + 自主对抗；DEV 后直交 QA 无中间审核点。TASK-004 spec v1→v2 补 §4.1 测试矩阵（首个执行实例） | `docs/architecture/ADR-0008-测试矩阵前移.md`、spec v2 |
