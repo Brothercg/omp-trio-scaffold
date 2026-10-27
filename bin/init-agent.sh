@@ -217,8 +217,6 @@ create_file "${GIT_DIR_ABS}/hooks/pre-commit" "${SCAFFOLD_ROOT}/templates/pre-co
 create_file "${GIT_DIR_ABS}/hooks/pre-push" "${SCAFFOLD_ROOT}/templates/pre-push" "755" 1
 create_file "${TARGET_DIR}/bin/trio-check-report.mjs" \
 	"${SCAFFOLD_ROOT}/bin/trio-check-report.mjs" "755" 1
-create_file "${TARGET_DIR}/bin/trio-align.sh" \
-	"${SCAFFOLD_ROOT}/bin/trio-align.sh" "755" 1
 
 # ── 6. 门禁回归测试 ───────────────────────────────────────────────────────
 
