@@ -8,9 +8,9 @@
 
 ---
 
-## 设计哲学
+## 1. 设计哲学
 
-### 一、物理写隔离，能力全开
+### 1.1 一、物理写隔离，能力全开
 
 不剥夺 omp 的任何底层工具与执行能力 —— LSP、DAP、终端执行、浏览器、
 子 Agent 全部保留。只在**写入落盘的那一刻**按角色拒绝越权路径。
@@ -28,7 +28,7 @@
 pre-commit 是第二道，防的是「hook 漏判」与「人类误提交」——它依赖
 `TRIO_ROLE` 环境变量，而环境变量可被调用方剥离（见「已知边界」）。
 
-### 二、契约独立于实现
+### 1.2 二、契约独立于实现
 
 形式化契约（接口签名 + Given-When-Then + 极值边界）由 ARCH 发布，
 测试由 QA 独立编写。开发**严禁**修改测试用例来掩盖 Bug；
@@ -36,7 +36,7 @@ QA 发现缺陷必须产出**最小报错复现脚本** + 缺陷文档。
 
 这条约束不是靠提示词自觉，而是靠目录白名单硬隔离。
 
-### 三、机械门禁优先于纪律
+### 1.3 三、机械门禁优先于纪律
 
 - 越权写入 → hook 当场拒绝
 - 越权提交 → pre-commit 拒绝
@@ -47,7 +47,7 @@ QA 发现缺陷必须产出**最小报错复现脚本** + 缺陷文档。
 
 ---
 
-## 目录结构
+## 2. 目录结构
 
 ```
 omp-trio-scaffold/
@@ -88,7 +88,7 @@ omp-trio-scaffold/
 └── .gitattributes
 ```
 
-### 目标项目中的落地形态
+### 2.1 目标项目中的落地形态
 
 `bin/init-agent.sh` 会在目标项目里创建：
 
@@ -118,7 +118,7 @@ omp-trio-scaffold/
 
 ---
 
-## 发布到本机（可选）
+## 3. 发布到本机（可选）
 
 不想每次敲长路径，可以把四个入口软链到 PATH 目录：
 
@@ -152,7 +152,7 @@ trio-start arch           # 开第一个角色
 
 ---
 
-## 接入新项目
+## 4. 接入新项目
 
 ```bash
 cd /path/to/omp-trio-scaffold
@@ -168,11 +168,11 @@ bin/init-agent.sh /path/to/your-project
 
 ---
 
-## 启动三角色
+## 5. 启动三角色
 
 **完整运行手册见 [`docs/RUNBOOK.md`](docs/RUNBOOK.md)**（含 tmux 按键、常见问题）。两种方式：
 
-### 方式 A：单终端，一次一个角色
+### 5.1 方式 A：单终端，一次一个角色
 
 最常用。开一个终端，跑一条命令就是一个角色：
 
@@ -197,7 +197,7 @@ bin/start-agent.sh qa        # 对抗测试
 2. 用 `--append-system-prompt` 注入对应角色简报
 3. 以 `--model` 指定默认模型（见下节）
 
-### 方式 B：tmux 单窗口三分屏
+### 5.2 方式 B：tmux 单窗口三分屏
 
 把当前终端切成三块，每块一个角色。一个 window、三个 pane——不是三个 window。
 
@@ -221,7 +221,7 @@ pane 默认 `remain-on-exit failed`：omp 异常退出时保留 pane 以便读�
 
 > 三个 pane 共享同一项目目录与同一 git 工作树；隔离仍由写策略白名单保证。
 
-### 模型：默认 `deepseek/deepseek-v4.1-flash`
+### 5.3 模型：默认 `deepseek/deepseek-v4.1-flash`
 
 三个角色默认都跑 `deepseek/deepseek-v4.1-flash`（commandcode provider）。
 `start-agent.sh` 始终以 `--model <模型>` 启动，`TRIO_MODEL` 可覆盖：
@@ -249,9 +249,9 @@ omp models find deepseek        # 按关键词搜索
 
 ---
 
-## 任务工作流
+## 6. 任务工作流
 
-### 一、建任务文件夹
+### 6.1 一、建任务文件夹
 
 ```bash
 mkdir -p docs/task/2026-10-25-登录改造
@@ -259,7 +259,7 @@ cp .omp/trio/templates/board.template.md docs/task/2026-10-25-登录改造/board
 cp .omp/trio/templates/spec.template.md  docs/task/2026-10-25-登录改造/arch-20261025-0900-spec.md
 ```
 
-### 二、产物命名规范
+### 6.2 二、产物命名规范
 
 ```
 <角色>-<YYYYMMDD>-<HHMM>-<主题>.md
@@ -278,7 +278,7 @@ cp .omp/trio/templates/spec.template.md  docs/task/2026-10-25-登录改造/arch-
 - 主题自由文本；**报告**的 topic 段必须以 `report` 开头（pre-commit 据此识别）。
 - 同一分钟写入多份 → 追加 `-2`、`-3`。
 
-### 三、状态机
+### 6.3 三、状态机
 
 ```mermaid
 stateDiagram-v2
@@ -318,7 +318,7 @@ stateDiagram-v2
 
 ---
 
-## 写策略
+## 7. 写策略
 
 策略唯一真值源：`.omp/trio/policy.txt`。语法：
 
@@ -332,7 +332,7 @@ deny  <role> <glob>       该角色禁止写入该路径
 - 判定：**deny 优先**；deny 未命中但 allow 命中则允许；两者都没命中则**拒绝**（fail-closed）
 - 路径相对于项目根目录；`*` 匹配任意字符（含 `/`）
 
-### 角色矩阵
+### 7.1 角色矩阵
 
 | 路径 | ARCH | DEV | QA |
 |---|:---:|:---:|:---:|
@@ -357,7 +357,7 @@ qa / arch 越写会被 pre-commit / trio-guard 拒绝。
 门禁自身（`.omp/hooks/**`、`.omp/trio/policy.txt`、`.git/hooks/pre-commit`、
 `bin/**`）对任何角色都是 deny —— 否则被约束者可以自行解除限制。
 
-### 发布与 push
+### 7.2 发布与 push
 
 发布权归 DEV 独占（`docs/architecture/ADR-0001-发布权与push管控.md`）：
 
@@ -367,7 +367,7 @@ qa / arch 越写会被 pre-commit / trio-guard 拒绝。
 
 完整矩阵见 [`docs/RUNBOOK.md` §4.5](docs/RUNBOOK.md)。
 
-### 为什么任务文件夹用文件名前缀而不是子目录
+### 7.3 为什么任务文件夹用文件名前缀而不是子目录
 
 一个任务的全部痕迹平铺在同一目录，`ls` 一次就能按时间读出
 spec → release → report → bug 的完整链路。改成 `arch/`、`dev/`、`qa/` 三个子目录，
@@ -376,7 +376,7 @@ spec → release → report → bug 的完整链路。改成 `arch/`、`dev/`、
 
 ---
 
-## 验收报告校验
+## 8. 验收报告校验
 
 报告是「任务通过」的唯一凭据，因此**提交时强制机械校验**：
 
@@ -409,7 +409,7 @@ bun bin/trio-check-report.mjs docs/task/<slug>/qa-20261025-1510-report-x.md
 
 ---
 
-## 多任务并行与 worktree
+## 9. 多任务并行与 worktree
 
 同一任务内的三个角色**共享同一个工作树** —— QA 必须能立刻看到 DEV 写的 `src/`。
 跨任务并行时，每个任务一个 worktree：
@@ -426,7 +426,7 @@ git worktree add ../wt-task-b -b feat/task-b
 
 ---
 
-## 四条铁律
+## 10. 四条铁律
 
 1. **契约先行**：ARCH 写完 AC 之前，DEV / QA 只能读、不能猜。
 2. **测试独立**：DEV 不改 `tests/`，QA 不改 `src/`；契约有错走 `contract-gap` 请 ARCH 裁决。
@@ -440,9 +440,9 @@ git worktree add ../wt-task-b -b feat/task-b
 
 ---
 
-## 自测
+## 11. 自测
 
-### 一键自测
+### 11.1 一键自测
 
 ```bash
 bin/trio-selftest.sh /path/to/your-project
@@ -467,7 +467,7 @@ bin/trio-selftest.sh /path/to/your-project
 bin/trio-selftest.sh --fast /path/to/your-project
 ```
 
-### 手动快速自测
+### 11.2 手动快速自测
 
 ```bash
 cd /path/to/your-project
@@ -483,7 +483,7 @@ git add tests/ && TRIO_ROLE=dev git commit -m probe   # 期望拒绝
 git add tests/ && git commit -m probe                 # 期望放行
 ```
 
-### 单元测试
+### 11.3 单元测试
 
 ```bash
 bun tests/trio-policy.test.mjs        # 门禁策略契约（111 项）
@@ -493,7 +493,7 @@ bun tests/trio-guard.test.mjs         # hook 运行时集成，不依赖模型�
 
 ---
 
-## 自举：能用本项目治理本项目吗
+## 12. 自举：能用本项目治理本项目吗
 
 **只能部分自举，不能三方齐上。** 写策略是按「业务项目」形状设计的（`src/` + `tests/` + `docs/task/`），
 而本仓库的「实现」是 `bin/`、`templates/`、`profiles/`、`.omp/trio/` —— 恰好都在保护区内。
@@ -528,7 +528,7 @@ meta 策略，但必须继续锁死 `policy.txt`、hook、报告校验器与 `bi
 
 ---
 
-## 已知边界
+## 13. 已知边界
 
 - **hook 拦不住 `eval` 里的全部写法**：只匹配代码中的文件路径字面量，
   运行时拼接出来的路径无法静态识别。

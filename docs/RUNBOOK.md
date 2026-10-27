@@ -65,7 +65,7 @@ trio-tmux --model claude-sonnet-5
 最通用，SSH、VS Code 终端、裸 tty 都一样。**一个终端对应一个 omp 进程**，
 `TRIO_ROLE` 只作用于该进程。
 
-### 只跑一个角色（不并行）
+### 0.1 只跑一个角色（不并行）
 
 ```bash
 cd ~/projects/my-app
@@ -83,7 +83,7 @@ trio-start qa
 > `trio-start` 内部的 `exec omp` 替换的是**脚本自身**的进程，不是你的交互 shell。
 > 所以退出 omp 后终端不会关闭，提示符还在，无需重开窗口。
 
-### 三个角色并行
+### 0.2 三个角色并行
 
 开三个终端，各自 `cd` 到同一项目目录，各跑一个角色：
 
@@ -98,7 +98,7 @@ trio-start qa
 - 不要在同一个 shell 里后台并行跑多个 omp：`TRIO_ROLE` 是进程环境变量，
   会互相覆盖身份。**必须分进程**。
 
-### 会话名自动同步为角色
+### 0.3 会话名自动同步为角色
 
 `.omp/extensions/trio-session-name.ts` 在 `session_start` 时把 omp 会话名设为
 `TRIO_ROLE`（`arch` / `dev` / `qa`）。走进程内扩展，不经过终端按键，因此没有
@@ -138,7 +138,7 @@ tmux select-pane -t trio-my-app:trio.0
 tmux attach -t trio-my-app
 ```
 
-### 布局
+### 0.4 布局
 
 | `--layout` | 排列 | 几何 | 适合 |
 |---|---|---|---|
@@ -148,7 +148,7 @@ tmux attach -t trio-my-app
 布局由你按屏幕方向自己选，脚本不自动推断（`tmux new-session -d` 创建时拿到的是
 服务端 80×24 默认尺寸，量不到真实屏幕，猜出来是错的）。
 
-### 参数
+### 0.5 参数
 
 | 参数 | 说明 |
 |---|---|
@@ -160,7 +160,7 @@ tmux attach -t trio-my-app
 | `--force` | 会话已存在时先 kill 重建 |
 | `--no-remain` | pane 退出后立即关闭（默认失败时保留 pane，便于看报错） |
 
-### 常用组合
+### 0.6 常用组合
 
 ```bash
 # 竖屏
@@ -177,7 +177,7 @@ trio-tmux --force --model claude-opus-5
 trio-tmux --project ~/projects/other-app --session trio-other
 ```
 
-### 操作要点
+### 0.7 操作要点
 
 | 操作 | 按键 |
 |---|---|
@@ -215,7 +215,7 @@ cp .omp/trio/templates/board.template.md docs/task/2026-10-25-登录改造/board
 
 ---
 
-## 4.5 发布与 push（ADR-0001）
+## 1. 4.5 发布与 push（ADR-0001）
 
 三色会话中：
 
@@ -228,7 +228,7 @@ cp .omp/trio/templates/board.template.md docs/task/2026-10-25-登录改造/board
   的写入权已从公共维护区收窄到 **dev 独占**；qa / arch 越写会被
   pre-commit / trio-guard 拒绝。
 
-### 角色 × 发布链矩阵
+### 1.1 角色 × 发布链矩阵
 
 | 动作 | arch | dev | qa | 用户（无角色） | 拦截层 |
 |---|---|---|---|---|---|

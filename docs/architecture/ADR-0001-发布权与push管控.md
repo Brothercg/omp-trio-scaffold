@@ -3,7 +3,7 @@
 - 状态：accepted
 - 日期：2026-10-26
 
-## 上下文
+## 1. 上下文
 
 omp-trio-scaffold 让三个 agent（arch / dev / qa）共享同一 git 工作树。
 现有门禁（`.omp/hooks/pre/trio-guard.ts` + `templates/pre-commit`，真值源
@@ -17,7 +17,7 @@ omp-trio-scaffold 让三个 agent（arch / dev / qa）共享同一 git 工作树
 风险场景：QA 判未通过 → dev 忙修复 → 任意另一角色顺手 push / 改版本号。
 三个 agent 并行行驶于同一工作树时，这类事故可以机械地发生。
 
-## 候选方案
+## 2. 候选方案
 
 1. **不限制，靠 rules.md 纪律文本** —— 优点：零机制成本。缺点：门禁体系
    （QA 报告机械校验）已证明纪律文本挡不住并行 agent 的误操作；agent 忘记
@@ -31,7 +31,7 @@ omp-trio-scaffold 让三个 agent（arch / dev / qa）共享同一 git 工作树
    「dev 写 `pyproject.toml`」的现实一致；只加一个 pre-push hook。缺点：
    dev 可能在 `user_signed` 前抢跑，需要放行前置条件兜底。
 
-## 决策
+## 3. 决策
 
 选定 **方案 4**，并把决策对象定义为**发布链全链**：
 
@@ -52,7 +52,7 @@ omp-trio-scaffold 让三个 agent（arch / dev / qa）共享同一 git 工作树
    维护区移入 dev 独占 —— bump / 截版是文件写入动作，pre-push 管不到，
    必须在文件层堵住 qa / arch 的口子。
 
-### 三角色视角的发布权矩阵
+### 3.1 三角色视角的发布权矩阵
 
 | 动作 | arch | dev | qa | 无 `TRIO_ROLE`（人工） | 执行层 |
 |---|---|---|---|---|---|
@@ -78,7 +78,7 @@ omp-trio-scaffold 让三个 agent（arch / dev / qa）共享同一 git 工作树
   争议、qa_passed → user_signed 之间的抢跑问题，都由用户签字终结；
   用户 `unset TRIO_ROLE` 后的人工推送不受 hook 管辖，是全链的兜底。
 
-## 被否决方案及否决理由
+## 4. 被否决方案及否决理由
 
 - 方案 1：纪律文本对并行 agent 无约束力，与「机械拦截优于自觉」的既有
   门禁哲学（pre-commit 强制报告校验）相矛盾。
@@ -88,7 +88,7 @@ omp-trio-scaffold 让三个 agent（arch / dev / qa）共享同一 git 工作树
   复杂度不比现状的 probem 少 —— 3 轮熔断机制已经给了 qa 否决权，qa 的
   「未通过」报告本身就是签发的反面。
 
-## 后果
+## 5. 后果
 
 - 正面：push / tag / bump / publish / 截版五类动作全部有了机械边界；
   与 pre-commit 同构（同一角色身份变量、同一逃生舱），认知成本接近零。
