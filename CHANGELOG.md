@@ -6,6 +6,34 @@
 格式：每版本一节，条目按「新增 / 修改 / 修复 / 弃用」分组，注明关联任务或 ADR。
 -->
 
+## v0.4.0 — 2026-10-27
+
+下游项目对齐工具 `trio-align` 与 U1 升级分类覆盖（TASK-004，
+ADR-0006 / ADR-0007 / ADR-0008 / ADR-0009）。
+
+### 新增
+- `bin/trio-align.sh`：`--check` / 默认 dry-run / `--apply` / `--map`，
+  纯 bash ≥4；固定别名表与 policy 逐字节比对（TASK-004 AC-1~AC-5）。
+- `tests/trio-align.test.mjs`：AC-1~AC-6 与边界回归，13 项。
+- `README.md` §14「下游适配」：三命令、`--map`、逃生舱 policy 标注、
+  四条验收链。
+
+### 修改
+- `bin/init-agent.sh` U1：`.omp/hooks/**`、`bin/**`、`templates/**`
+  执行件升级覆盖；`policy.txt` 有 diff 时打印并保留本地版本。
+- `trio-align.sh` 不随下游部署（V-2）：init-agent 部署清单移除该脚本。
+- ADR-0009：`templates/*.template.md` 文档模板放权 ARCH；门禁执行件
+  `templates/pre-commit`、`templates/pre-push` 保持全角色拒绝。
+
+### 修复
+- 清理 selftest probe 夹具残留：`docs/task/TRIO-SELFTEST/` 报告与
+  `src/trio_probe.py` 移出 HEAD，新增 `src/__init__.py` tracked 占位
+  （B-3；`223c218` + `b0f7689`）。
+
+### 测试
+- 7 套件 328 项 0 失败；`bin/trio-selftest.sh --fast` 20/0；
+  干净 HEAD `trio-align.sh --check` exit 0。
+
 ## v0.3.0 — 2026-10-26
 
 三角色回复规范与任务接力机制（TASK-003，ADR-0004 / ADR-0005）。
