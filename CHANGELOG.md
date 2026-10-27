@@ -6,6 +6,29 @@
 格式：每版本一节，条目按「新增 / 修改 / 修复 / 弃用」分组，注明关联任务或 ADR。
 -->
 
+## v0.5.0 — 2026-10-27
+
+下游需求上下文回流机制（回流卡，TASK-005 / ADR-0010）。
+
+### 新增
+- `templates/backflow.template.md`：七段回流卡（背景 / 触发场景 /
+  现状与版本 / 期望行为 / 约束 / 建议验收 AC 草案 / 附件指针），
+  含绝对路径铁律、一卡一需求、自检清单；`init-agent.sh` 随
+  `templates/*.md` 自动注入下游 `.omp/trio/templates/`。
+- `README.md` §15「需求回流：下游 → 本仓」：触发、填卡、传递三步，
+  自豁免与 feedback 双轨说明。
+- ADR-0010：回流形态选型与 8 分支决策；TASK-005 spec v1。
+
+### 修改
+- `docs/RUNBOOK.md`：命令速查表 + 标题编号归位（4.5 / 子节），
+  初始化 FAQ 指引细化。
+
+### 测试
+- AC-1 init 注入冒烟：目标 `.omp/trio/templates/backflow.template.md`
+  与源逐字节相等；init 完成 23 项。
+- `trio-gate-contract` 12/0；`bin/trio-selftest.sh --fast` 20/0；
+  `trio-align.sh --check .` → `aligned`。
+
 ## v0.4.1 — 2026-10-27
 
 验收链归档与回归补强（TASK-002 / TASK-003 / TASK-004 归档）。
