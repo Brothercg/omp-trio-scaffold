@@ -241,6 +241,57 @@ check("AC-12 按 TASK-002 / TASK-003 两看板状态核验：签字前查未提�
 	assert.match(t3raw.board, /回收/, "TASK-003 看板决策记录缺回收动作行");
 });
 
+// ── B-4 回归：create_file 源=目标自复制不中断 ─────────────────────────────
+
+console.log("\n[B-4 回归：init-agent 自复制（脚手架根 = 目标）不中断]");
+
+// TASK-003 B-4 缺陷：TARGET_DIR = SCAFFOLD_ROOT 时 create_file 源=目标
+// （install(src,dest) 同名即删空内容），脚本中途断，[3/6]-[5/6] 全部未执行。
+// 修复后语义：已存在 + 无差异 → 跳过；源=目标经 cmp -s 恒等价，必须走跳过
+// 分支而不是 overwrite。钉住该修复，防止回退。
+check("B-4 回归：脚手架根自复制 init（普通 + --force）exit 0，执行件逐字节原地不变", () => {
+	const target = fs.mkdtempSync(path.join(os.tmpdir(), "b4-selfcopy-"));
+	try {
+		// 复制脚手架快照到 tmp（真值源保持只读），并在快照内跑 init 自身
+		execFileSync("bash", [
+			"-c",
+			`git -C ${JSON.stringify(ROOT)} archive HEAD | tar -x -C ${JSON.stringify(target)} && git -C ${JSON.stringify(target)} init -q`,
+		]);
+		// 基线：关键执行件的逐字节指纹（init 前后必须不变——跳过，不是覆盖）
+		const probes = [
+			path.join(target, ".omp/trio/policy.txt"),
+			path.join(target, ".omp/hooks/pre/trio-guard.ts"),
+			path.join(target, "templates/pre-push"),
+		];
+		const before = probes.map((p) => fs.readFileSync(p));
+
+		const run = (args) => execFileSync("bash", [path.join(target, "bin/init-agent.sh"), ...args], {
+			cwd: target, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+		});
+
+		// 普通模式：全跳过、零创建，exit 0（中途断会丢掉后半段输出）
+		const r1 = run([target]);
+		assert.ok(/完成：/.test(r1), "init 未跑完（缺「完成」行）——B-4 复发特征：[3/6]-[5/6] 未执行");
+		assert.match(r1, /跳过  \.omp\/trio\/policy\.txt/, "policy 自复制未走跳过分支");
+		assert.ok(!/创建  \.omp\/trio\/policy\.txt/.test(r1), "已存在的 policy 被 create_file 重建（应跳过）");
+
+		// --force 模式：cmp -s 恒等 → 全部「已是最新」跳过，不覆盖不截断
+		const r2 = run(["--force", target]);
+		assert.ok(/完成：/.test(r2), "--force 模式未跑完（B-4 复发特征）");
+		assert.match(r2, /跳过  \.omp\/trio\/policy\.txt（已是最新）/, "--force 下源=目标应走 cmp 相等跳过分支");
+
+		// 数据零损：三个执行件逐字节与 init 前一致
+		for (let i = 0; i < probes.length; i++) {
+			assert.ok(
+				before[i].equals(fs.readFileSync(probes[i])),
+				`自复制 bug 可能截断 ${probes[i]}（init 前后逐字节指纹变化）`,
+			);
+		}
+	} finally {
+		fs.rmSync(target, { recursive: true, force: true });
+	}
+});
+
 // ── 汇总 ──────────────────────────────────────────────────────────────────
 
 console.log(`\n${passed} passed, ${failures.length} failed`);
