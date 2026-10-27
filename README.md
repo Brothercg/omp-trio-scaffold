@@ -14,33 +14,20 @@ flowchart LR
     ARCH["ARCH<br/>契约 / 仲裁"]
     DEV["DEV<br/>实现 / 发布"]
     QA["QA<br/>对抗测试"]
-    SPEC[("契约 spec<br/>arch-*-spec.md vN")]
-    SRC[("src/ 业务实现")]
-    TESTS[("tests/ 对抗用例")]
-    BOARD[("board.md<br/>共享看板")]
 
-    ARCH -->|"发布 / 修订 v+1"| SPEC
-    SPEC -->|"读契约"| DEV
-    SPEC -->|"读契约"| QA
-    DEV -->|"写 src/ + dev-release.md"| SRC
-    QA -->|"写 tests/ + qa-report.md"| TESTS
-    SRC -.->|"被测"| QA
-    QA -->|"缺陷/contract-gap"| ARCH
-    ARCH -->|"裁决 → DEV 修 / 契约 v+1"| SPEC
-    DEV -->|"push / tag / release"| PUSH[("发布")]
-    QA -.->|"qa_passed + user_signed<br/>前置"| PUSH
-    ARCH -.->|"终验签字"| PUSH
-    ARCH <-->|"三方共写"| BOARD
-    DEV <-->|"三方共写"| BOARD
-    QA <-->|"三方共写"| BOARD
+    ARCH -->|"发布契约"| DEV
+    ARCH -->|"发布契约"| QA
+    DEV -.->|"被测"| QA
+    QA -->|"缺陷 / contract-gap"| ARCH
+    ARCH -->|"裁决：DEV 修 / 契约 v+1"| DEV
+    QA -.->|"qa_passed + user_signed"| DEV
 ```
 
 **读图要点**：
 
-- **契约是唯一接口**：ARCH 发布 `spec`，DEV / QA 各自只读契约实现；契约不清由 ARCH 补齐，不得猜。
-- **写隔离**：`src/` 仅 DEV、`tests/` 仅 QA、`arch-*.md` 仅 ARCH；`board.md` 三方共写。
-- **环形回路**：QA 发现缺陷 → ARCH 裁决（实现缺陷 → DEV 修；契约缺陷 → ARCH 修契约 v+1）→ QA 复测。
-- **发布闸门**：push / tag / release 仅 DEV 可执行，前置 = QA 报告全绿 + 看板 `qa_passed` + 用户 `user_signed`；qa / arch 的 push 被 pre-push 机械拒绝。
+- **契约是唯一接口**：ARCH 发布契约，DEV / QA 各自只读实现；契约不清由 ARCH 补齐。
+- **环形回路**：QA 发现缺陷 → ARCH 裁决（实现缺陷 → DEV 修；契约缺陷 → 契约 v+1）→ QA 复测。
+- **发布闸门**：push / tag / release 仅 DEV 可执行，前置 = QA 报告全绿 + `qa_passed` + 用户 `user_signed`。
 
 ---
 
