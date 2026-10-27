@@ -6,6 +6,25 @@
 格式：每版本一节，条目按「新增 / 修改 / 修复 / 弃用」分组，注明关联任务或 ADR。
 -->
 
+## v0.4.1 — 2026-10-27
+
+验收链归档与回归补强（TASK-002 / TASK-003 / TASK-004 归档）。
+
+### 新增
+- `tests/trio-gate-contract.test.mjs` B-4 回归：脚手架根自复制 `init-agent`
+  （普通 + `--force`）exit 0，policy / guard / pre-push 三执行件逐字节不变。
+- TASK-004 AC-9「两树两证」口径（干净树 `--check`；初始化工作树 selftest），
+  spec v4 + `arch-20261027-1151-verdict-2.md`。
+
+### 修改
+- TASK-002 AC-12 由 SKIP 回填为通过：签字后回收三件套核验成立。
+- TASK-001 / TASK-002 / TASK-003 看板归档回收；TASK-001 `user_signed`
+  时点补记为 2026-10-26 09:30。
+
+### 测试
+- `trio-gate-contract` 12/0；`bin/trio-selftest.sh --fast` 20/0；
+  `trio-align.sh --check .` → `aligned`。
+
 ## v0.4.0 — 2026-10-27
 
 下游项目对齐工具 `trio-align` 与 U1 升级分类覆盖（TASK-004，
