@@ -15,10 +15,10 @@
 
 | 字段 | 值 |
 |---|---|
-| 当前状态 | `testing`（QA 第 2 轮：AC-4/AC-5 按 V-1 转通过 + 对抗用例两侧全绿；AC-9 仍被 B-3 阻塞——环境级，不计熔断） |
+| 当前状态 | `qa_passed`（第 3 轮复测全绿：AC-9 转通过、断言同步 3 组、selftest 20/0；等 user_signed） |
 | 最后推进人 | `QA` |
-| 最后更新 | `2026-10-27 10:56` |
-| qa_report | `docs/task/TASK-004-2026-10-27-下游对齐工具/qa-20261027-1054-report-下游对齐工具-第2轮.md` |
+| 最后更新 | `2026-10-27 11:17` |
+| qa_report | `docs/task/TASK-004-2026-10-27-下游对齐工具/qa-20261027-1117-report-下游对齐工具-第3轮.md` |
 
 ### 处置流程
 
@@ -26,8 +26,8 @@
 |---|---|---|
 | ① ARCH 设计（契约定稿） | done | spec v1 |
 | ② DEV 开发 | done | 第 1 轮：落盘 `27a01d5`，自测全绿 |
-| ③ QA 测试 | 进行中 | 第 1 轮 13过/1半/1未 → 第 2 轮 V-1 口径落地：AC-4/AC-5 转通过 + 对抗用例；剩 AC-9 待 B-3 |
-| ④ 闭环（user_signed + 挂起清单清零） | 待办 | — |
+| ③ QA 测试 | done | 第 3 轮复测全绿（qa-20261027-1117）：AC-9 转通过、矩阵 9 行全绿、断言同步 3 组、7 套件 328/0 |
+| ④ 闭环（user_signed + 挂起清单清零） | 进行中 | 等 user_signed |
 
 迭代日志：
 - 第 0 轮 09:47：grill-me 对齐会话 downstream-adapt 7 问全解 → ADR-0006/0007 用户审核通过 → TASK-004 立项，spec v1 定稿，② 交 DEV 开工
@@ -43,6 +43,14 @@
   人工同步归零）+ AC-5 补 policy.txt 零写入断言 —— 全绿（套件 13/0 × 3）；
   AC-9 复核仍被 B-3 阻塞（probe 夹具未修，环境级，不计熔断）；GR-2 实证记录
   于报告 SKIP 行；报告 qa-20261027-1054（校验器合规）
+- 第 3 轮 11:01：DEV 收尾：`b0f7689` B-3 src 半区（probe 删 + `src/__init__.py` 占位）；
+  `a576893` GR-2 部署收尾（init-agent 移除 trio-align 部署行）；`223c218` docs 半区落
+  （无角色提交）；B-4（ADR-0009 测试漂移）归 QA
+- 第 3 轮 11:17：QA 第 3 轮复测全绿：3 组断言同步（AC-6 反转部署断言、
+  trio-guard/policy ADR-0009 文档模板 arch 放行 + 执行件仍全拒）→ 7 套件
+  328/0；干净 HEAD `--check` exit 0（probe 已清零）+ selftest 20/0 →
+  AC-9 转通过、矩阵全绿；B-3/GR-2 挂起解除；报告 qa-20261027-1117；
+  ③ done → ④ 等 user_signed
 
 ②⇄③ 回环即迭代；轮次口径 = 3 轮熔断定义（「QA 判未通过 → DEV 修 → QA 复测」计 1 轮）。
 
@@ -57,18 +65,18 @@
 | AC-3 默认 dry-run 不落盘 | ✅ | ✅ | ✅ | 通过（qa-20261027-1030；`git status --porcelain` 前后逐字节一致） |
 | AC-4 `--apply` 迁移与引用清扫 | ✅（v3） | ✅ | ✅ | 通过（qa-20261027-1054：V-1 口径夹具 + 对抗用例两侧；第 1 轮半通过转正） |
 | AC-5 `--apply` 核验报告零越界 | ✅（v3） | ✅ | ✅ | 通过（qa-20261027-1054：非路径行 + policy.txt 零写入 Buffer/diff 双断言；qa-20261027-1030 首验） |
-| AC-6 升级分类覆盖（U1） | ✅ | ✅ | ✅ | 通过（qa-20261027-1030 独立探针：执行件覆盖 + policy 保留 + exit 0） |
-| AC-7 回归测试 | ✅ | ✅ 13/0 | ✅ | 通过（qa-20261027-1054：更新后 13 项 × 3 次运行全绿，确定性满足） |
+| AC-6 升级分类覆盖（U1） | ✅（v3） | ✅ | ✅ | 通过（qa-20261027-1030 探针首验；qa-20261027-1117 断言反转——不再部署 trio-align，V-2 落地） |
+| AC-7 回归测试 | ✅ | ✅ 328/0 | ✅ | 通过（qa-20261027-1117：7 套件全绿；断言同步 b/c 落地） |
 | AC-8 文档落地 | ✅ | ✅ README §14 | ✅ | 通过（§14 下游适配 + §14.1 三命令 + §14.2 逃生舱与验收链） |
-| AC-9 验收链自证 | ✅ | ⚠️（受 B-3 阻塞） | ❌ | 未通过（环境级）：干净 HEAD 上 `--check` exit 1 —— HEAD 残留 selftest probe 夹具 commits（37dc5af/d508032/266e905），B-3 未修（第 2 轮 10:52 复核确认）；不熔断，修复后第 3 轮复核 |
+| AC-9 验收链自证 | ✅ | ✅ | ✅ | 通过（qa-20261027-1117：B-3 双半区落 HEAD，干净 HEAD `--check` exit 0 + selftest 20/0；第 1/2 轮环境级阻塞解除） |
 
 ## 4. 阻塞与待裁决
 
 | 编号 | 类型 | 描述 | 提出 | 待谁 | 起始时间 |
 |---|---|---|---|---|---|
 | B-2 | `已裁决` | GR-1/GR-2 均判 `契约缺陷`：V-1 选 A（AC-4 夹具改 policy 相等，policy diff 只由 AC-2 检出、人工同步后归零）；V-2 三态裁定①仅脚手架仓运行（②环境变量/③参数否决）。spec v2→v3；处置修正（10:57）：init-agent.sh 移除 trio-align 部署行（ALIGN-DEPLOYED 差异，用户落盘） | `DEV` | `ARCH`（已裁决） | `2026-10-27 10:02` |
-| B-3 | 实现（环境级） | 本仓 HEAD 残留 selftest probe 夹具 commits（37dc5af/d508032/266e905：TRIO-SELFTEST 报告 + `src/trio_probe.py`），干净 HEAD `--check` exit 1，阻塞 AC-9；修复 = git rm 两 probe 路径 + `src/` tracked 占位（QA 已在 simulated HEAD 验证归零）。第 2 轮 10:52 复核仍未修（`git ls-tree` 两 probe 路径仍在 HEAD）；**不熔断**（环境级阻塞，修复后第 3 轮复核） | QA | DEV/用户 | `2026-10-27 10:30` |
-| B-4 | 测试契约漂移 | ADR-0009 已允许 `arch` 写 `templates/*.template.md`，但 `tests/trio-guard.test.mjs` / `tests/trio-policy.test.mjs` 仍断言全角色拒绝 `templates/board.template.md`；`trio-selftest --fast` 18/2（guard 61/1、policy 129/1），阻塞 AC-9 全绿 | DEV | QA | `2026-10-27 11:01` |
+| B-3 | ✅ 已解除 | HEAD probe 夹具残留（TRIO-SELFTEST 报告 + `src/trio_probe.py`）阻塞 AC-9 —— 双半区落 HEAD：`223c218`（docs 半区，无角色）+ `b0f7689`(src 半区 + `src/__init__.py` 占位)；干净 HEAD `--check` exit 0（qa-20261027-1117 probe 复证） | QA | 已解除 | `2026-10-27 10:30` |
+| B-4 | ✅ 已解除 | ADR-0009 测试漂移：guard/policy 仍断言全角色拒绝文档模板 —— QA 第 3 轮断言同步 b/c：arch 放行 3 模板 + dev/qa 仍拒 + pre-commit/pre-push 全拒；7 套件 328/0（qa-20261027-1117） | DEV | 已解除 | `2026-10-27 11:01` |
 
 ## 5. 决策记录
 
@@ -114,6 +122,6 @@ policy 字节不变、人工同步后归零）+ AC-5 补 policy.txt 零写入双
 
 | 条目 | 解除条件 | 触发者 | 解除后动作 |
 |---|---|---|---|
-| AC-9（B-3 未修） | 用户/DEV 无角色执行 `git rm -r docs/task/TRIO-SELFTEST src/trio_probe.py` + `src/` tracked 占位并提交（命令见 qa-20261027-1030-bug-1.md §4） | 用户 | QA 第 3 轮复核：干净 HEAD `--check` exit 0 + AC-9 行转「通过」；全矩阵绿 → ③ 状态 qa_passed |
-| GR-2 部署收尾（U1 覆盖范围修正） | DEV 按 spec v3 §2 从 `bin/init-agent.sh` 部署清单移除 `trio-align.sh`（不随下游部署） | DEV | QA 第 3 轮一并复核：部署产物中无 `bin/trio-align.sh`，AC-6 断言相应更新由 QA 实施 |
-| ADR-0009 测试同步（B-4） | QA 更新 `tests/trio-guard.test.mjs` / `tests/trio-policy.test.mjs`：`templates/*.template.md` 对 arch 放行、对 dev/qa 拒绝；`templates/pre-commit`/`pre-push` 保持全角色拒绝 | QA | 同步后 `trio-selftest --fast` 应全绿，AC-9 才可转通过 |
+| ~~AC-9（B-3 未修）~~ 已解除 | 双半区落 HEAD：`223c218`（docs）+ `b0f7689`（src + `src/__init__.py` 占位） | 用户/DEV 已执行 | 已清零：第 3 轮复核干净 HEAD `--check` exit 0；AC-9 行转「通过」；全矩阵绿；③ → `qa_passed` |
+| ~~GR-2 部署收尾~~ 已解除（V-2） | `a576893` init-agent 移除 trio-align 部署行 | DEV 已执行 | 已清零：第 3 轮 AC-6 反转断言 `!exists(下游 bin/trio-align.sh)` + 干净 HEAD `grep trio-align bin/init-agent.sh` = 0 |
+| ~~ADR-0009 测试同步（B-4）~~ 已解除 | QA 断言同步 b/c（arch 放行 3 文档模板 / dev、qa 拒 / 执行件全拒） | QA 已执行 | 已清零：guard 68/0、policy 140/0；7 套件 328/0；AC-9 转通过 → `qa_passed`。真闭环剩 user_signed |

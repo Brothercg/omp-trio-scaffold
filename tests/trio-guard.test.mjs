@@ -235,7 +235,8 @@ await expectAllow("DEV bash git status 放行", "dev", "bash", { command: "git s
 
 console.log("\n[门禁自保与通道回收后的 fail-closed（AC-11，verdict shared：回收后）]");
 
-// deny *：policy / pre-commit / guard / 自检脚本 / 产物模板 —— 回收后任何角色一律拒绝。
+// deny *：policy / pre-commit / guard / 自检脚本 / 门禁执行件模板 —— 任何角色一律拒绝。
+// （ADR-0009：文档模板 templates/*.template.md 放权 arch，单独断言见下一块；执行件仍 fail-closed。）
 for (const target of [
 	".omp/trio/policy.txt",
 	".git/hooks/pre-commit",
@@ -244,12 +245,21 @@ for (const target of [
 	"bin/init-agent.sh",
 	"templates/pre-push",
 	"templates/pre-commit",
-	"templates/board.template.md",
 ]) {
 	for (const role of ["dev", "arch", "qa"]) {
-		await expectBlock(`[${role}] 不得写 ${target}（通道回收后 deny * 全面恢复）`, role, "write",
+		await expectBlock(`[${role}] 不得写 ${target}（deny * / fail-closed）`, role, "write",
 			{ path: target, content: "x" });
 	}
+}
+
+// ADR-0009 文档模板分离：templates/*.template.md 对 arch 放行、dev/qa 仍拒绝。
+for (const target of ["templates/board.template.md", "templates/report.template.md", "templates/spec.template.md"]) {
+	await expectAllow(`[arch] 文档模板放行：${target}（ADR-0009）`, "arch", "write",
+		{ path: target, content: "x" });
+	await expectBlock(`[dev] 文档模板仍拒绝：${target}（ADR-0009）`, "dev", "write",
+		{ path: target, content: "x" });
+	await expectBlock(`[qa] 文档模板仍拒绝：${target}（ADR-0009）`, "qa", "write",
+		{ path: target, content: "x" });
 }
 
 // 回收核验：BEGIN/END 标记必须清零；fail-closed 自动恢复。

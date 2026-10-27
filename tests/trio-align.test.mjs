@@ -241,7 +241,7 @@ check("AC-6 init-agent U1：执行件覆盖，policy diff 保留且 exit 0", () 
 	assertEqual(result.status, 0, "init-agent exit code");
 	assertEqual(fs.readFileSync(guard, "utf8"), fs.readFileSync(path.join(ROOT, ".omp/hooks/pre/trio-guard.ts"), "utf8"), "guard 未覆盖");
 	assertEqual(fs.readFileSync(path.join(repo, "bin/trio-check-report.mjs"), "utf8"), fs.readFileSync(path.join(ROOT, "bin/trio-check-report.mjs"), "utf8"), "checker 未覆盖");
-	assert(fs.existsSync(path.join(repo, "bin/trio-align.sh")), "trio-align.sh 未部署");
+	assert(!fs.existsSync(path.join(repo, "bin/trio-align.sh")), "trio-align.sh 不得随下游部署（spec v3 §2 / V-2：只从脚手架仓调用）");
 	assertEqual(fs.readFileSync(path.join(repo, ".omp/trio/policy.txt"), "utf8"), localPolicy, "policy 不得覆盖");
 	assert(result.stdout.includes("保留"), "缺少 policy 保留提示");
 	assert(result.stdout.includes("diff"), "缺少 policy diff 提示");

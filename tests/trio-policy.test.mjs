@@ -162,7 +162,8 @@ for (const file of ["CHANGELOG.md", "pyproject.toml", "setup.cfg", "setup.py"]) 
 
 console.log("\n[门禁自身保护]");
 
-// deny *：policy 真值源、pre-commit 关卡、guard 执行件、模板钩子，对任何角色都拒绝。
+// deny *：policy 真值源、pre-commit 关卡、guard 执行件、门禁执行件模板钩子，
+// 对任何角色都拒绝。文档模板 templates/*.template.md 已按 ADR-0009 放权 arch（下一块单独断言）。
 for (const file of [
 	".omp/trio/policy.txt",
 	".git/hooks/pre-commit",
@@ -172,10 +173,24 @@ for (const file of [
 	"bin/init-agent.sh",
 	"templates/pre-push",
 	"templates/pre-commit",
-	"templates/board.template.md",
 	"docs/REPLY-CONVENTIONS.md",
 ]) {
-	check(`任何角色都不得写 ${file}（通道回收后 deny * 全面恢复）`, () => {
+	check(`任何角色都不得写 ${file}（deny * / fail-closed）`, () => {
+		assertDenied("arch", file);
+		assertDenied("dev", file);
+		assertDenied("qa", file);
+	});
+}
+
+// ADR-0009 文档模板分离：templates/*.template.md 对 arch 放行、dev/qa 仍拒绝；
+// pre-commit / pre-push（执行件）保持全角色拒绝。
+for (const file of ["templates/board.template.md", "templates/report.template.md", "templates/spec.template.md"]) {
+	check(`arch 可写文档模板 ${file}（ADR-0009）`, () => assertAllowed("arch", file));
+	check(`dev 仍拒绝文档模板 ${file}（ADR-0009）`, () => assertDenied("dev", file));
+	check(`qa 仍拒绝文档模板 ${file}（ADR-0009）`, () => assertDenied("qa", file));
+}
+for (const file of ["templates/pre-commit", "templates/pre-push"]) {
+	check(`pre-commit/pre-push 仍全角色拒绝 ${file}`, () => {
 		assertDenied("arch", file);
 		assertDenied("dev", file);
 		assertDenied("qa", file);
