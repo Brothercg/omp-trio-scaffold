@@ -15,9 +15,10 @@
 
 | 字段 | 值 |
 |---|---|
-| 当前状态 | `testing` |
-| 最后推进人 | `DEV` |
-| 最后更新 | `2026-10-27 10:05` |
+| 当前状态 | `testing`（QA 第 1 轮：未通过 AC-9 + 半通过 AC-4；等 DEV 修 probe 残留、ARCH 裁 V-1/V-2） |
+| 最后推进人 | `QA` |
+| 最后更新 | `2026-10-27 10:32` |
+| qa_report | `docs/task/TASK-004-2026-10-27-下游对齐工具/qa-20261027-1030-report-下游对齐工具-第1轮.md` |
 
 ### 处置流程
 
@@ -25,7 +26,7 @@
 |---|---|---|
 | ① ARCH 设计（契约定稿） | done | spec v1 |
 | ② DEV 开发 | done | 第 1 轮：落盘 `27a01d5`，自测全绿 |
-| ③ QA 测试 | 待办 | — |
+| ③ QA 测试 | 进行中 | 第 1 轮已执行：13 通过 / 1 半通过（AC-4）/ 1 未通过（AC-9），见 qa_report |
 | ④ 闭环（user_signed + 挂起清单清零） | 待办 | — |
 
 迭代日志：
@@ -34,6 +35,9 @@
   `bin/**`、`tests/**` 无写通道，交付 patch 待用户落盘；GR-1/GR-2 报 ARCH
 - 第 1 轮 10:05：用户无角色落盘 `27a01d5`；DEV 复跑 align 12/0、`--check` aligned、
   `trio-selftest --fast` 20/0；② done，③ 交 QA
+- 第 1 轮 10:32：QA 第 1 轮验收：13 通过 / 半通过 AC-4（GR-1 口径待 V-1）/ 未通过 AC-9
+  （本仓 HEAD 残留 selftest probe 夹具 37dc5af/d508032/266e905，阻塞验收链第 1 条；
+  修复方向已机器验证并写入 qa bug-1）；报告 qa-20261027-1030（校验器合规）
 
 ②⇄③ 回环即迭代；轮次口径 = 3 轮熔断定义（「QA 判未通过 → DEV 修 → QA 复测」计 1 轮）。
 
@@ -43,21 +47,22 @@
 
 | AC | 契约定稿 | 实现 | 验证 | 状态 |
 |---|---|---|---|---|
-| AC-1 `--check` 对齐判定 | ✅ | ✅ | ☐ | 待 QA |
-| AC-2 `--check` 差异检出 | ✅ | ✅ | ☐ | 待 QA |
-| AC-3 默认 dry-run 不落盘 | ✅ | ✅ | ☐ | 待 QA |
-| AC-4 `--apply` 迁移与引用清扫 | ✅ | ✅ | ☐ | 待 QA；GR-1 待裁决 |
-| AC-5 `--apply` 核验报告零越界 | ✅ | ✅ | ☐ | 待 QA |
-| AC-6 升级分类覆盖（U1） | ✅ | ✅ | ☐ | 待 QA |
-| AC-7 回归测试 | ✅ | ✅ 12/0 | ☐ | 待 QA |
-| AC-8 文档落地 | ✅ | ✅ README §14 | ☐ | 待 QA |
-| AC-9 验收链自证 | ✅ | ✅ aligned + selftest 20/0 | ☐ | 待 QA |
+| AC-1 `--check` 对齐判定 | ✅ | ✅ | ✅ | 通过（qa-20261027-1030） |
+| AC-2 `--check` 差异检出 | ✅ | ✅ | ✅ | 通过（qa-20261027-1030） |
+| AC-3 默认 dry-run 不落盘 | ✅ | ✅ | ✅ | 通过（qa-20261027-1030；`git status --porcelain` 前后逐字节一致） |
+| AC-4 `--apply` 迁移与引用清扫 | ✅ | ✅ | ⚠️ | 半通过：policy 相等夹具全绿；spec 原文 Given（policy 有 diff）下 `--check`=1 —— GR-1 待 V-1，不判实现缺陷 |
+| AC-5 `--apply` 核验报告零越界 | ✅ | ✅ | ✅ | 通过（qa-20261027-1030；policy.txt 逐字节不变） |
+| AC-6 升级分类覆盖（U1） | ✅ | ✅ | ✅ | 通过（qa-20261027-1030 独立探针：执行件覆盖 + policy 保留 + exit 0） |
+| AC-7 回归测试 | ✅ | ✅ 12/0 | ✅ | 通过（3 次运行均 12/0，确定性满足） |
+| AC-8 文档落地 | ✅ | ✅ README §14 | ✅ | 通过（§14 下游适配 + §14.1 三命令 + §14.2 逃生舱与验收链） |
+| AC-9 验收链自证 | ✅ | ✅ aligned + selftest 20/0 | ❌ | 未通过：干净 HEAD 上 `--check` exit 1 —— 本仓 HEAD 残留 selftest probe 夹具 commits（37dc5af/d508032/266e905）；修复方向已机器验证，见 qa-20261027-1030-bug-1.md |
 
 ## 4. 阻塞与待裁决
 
 | 编号 | 类型 | 描述 | 提出 | 待谁 | 起始时间 |
 |---|---|---|---|---|---|
 | B-2 | 契约 | GR-1：AC-2 policy diff 与 AC-4 `--apply` 后 `--check` 0、AC-5 零越界冲突；GR-2：`trio-align.sh` 上游 policy 定位未定义 | DEV | ARCH | `2026-10-27 10:02` |
+| B-3 | 实现（环境级） | 本仓 HEAD 残留 selftest probe 夹具 commits（37dc5af/d508032/266e905：TRIO-SELFTEST 报告 + `src/trio_probe.py`），干净 HEAD `--check` exit 1，阻塞 AC-9；修复 = git rm 两 probe 路径 + `src/` tracked 占位（QA 已在 simulated HEAD 验证归零） | QA | DEV/用户 | `2026-10-27 10:30` |
 
 ## 5. 决策记录
 
@@ -82,6 +87,12 @@ QA 重点：
 4. AC-6 已由 `tests/trio-align.test.mjs` 覆盖（执行件覆盖 + policy diff 保留）。
 5. 工作区有非本任务残留（`D docs/task/TRIO-SELFTEST/...`、`D src/trio_probe.py`、
    `?? .omp/trio/templates/`），不要纳入本任务验收。
+
+③ QA 第 1 轮（10:30）：AC-1..AC-3/5/6/7/8 + 6 边界全过（均含独立探针复证）；
+AC-4 半通过（GR-1 选 A 口径实现侧全绿，spec v1 原文 Given 未改写，待 ARCH V-1）；
+AC-9 未通过（B-3：HEAD 残留 probe 夹具，修复方向已机器验证）。GR-1/GR-2 均记
+B-2 待 ARCH 裁决，QA 未将其判为实现缺陷。报告 `qa-20261027-1030`、缺陷
+`qa-20261027-1030-bug-1`（编号 B-3）。
 
 ## 7. 挂起清单（SKIP/待解除）
 
