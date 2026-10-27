@@ -122,15 +122,19 @@ check("AC-3 默认 dry-run 打印操作且 git status 前后一致", () => {
 	assertEqual(status(repo), before, "git status 必须逐字节不变");
 });
 
-// ── AC-4 ───────────────────────────────────────────────────────────────────
-check("AC-4 --apply 迁移 lib→src、清扫引用，随后 --check 0 且幂等", () => {
-	const repo = makeRepo({ withLib: true, withSrc: false });
+// ── AC-4（verdict-1 V-1 口径：夹具 = 目录差异 + policy 逐字节相等）───────────
+check("AC-4(V-1) --apply 迁移 lib→src、清扫引用，随后 --check 0 且幂等（policy 相等夹具）", () => {
+	const repo = makeRepo({ withLib: true, withSrc: false, policyDiff: false });
+	const policyBefore = fs.readFileSync(path.join(repo, ".omp/trio/policy.txt"));
+	assert(!Buffer.compare(policyBefore, fs.readFileSync(UPSTREAM_POLICY)), "夹具前置：policy 应与上游逐字节相等");
+
 	const r = run(repo, ["--apply"]);
 	assertEqual(r.code, 0, "apply exit code");
 	assert(fs.existsSync(path.join(repo, "src", "a.txt")), "src/a.txt 未生成");
 	assert(!fs.existsSync(path.join(repo, "lib")), "lib/ 未消失");
 	assertEqual(fs.readFileSync(path.join(repo, "src", "a.txt"), "utf8"), "use src/a.txt\n", "源文件引用未清扫");
 	assertEqual(fs.readFileSync(path.join(repo, "docs", "note.md"), "utf8"), "src/a.txt\nkeep me\n", "文档引用未清扫");
+	assert(!Buffer.compare(fs.readFileSync(path.join(repo, ".omp/trio/policy.txt")), policyBefore), "--apply 不得写 policy.txt（V-1）");
 
 	const c = run(repo, ["--check"]);
 	assertEqual(c.code, 0, "apply 后 --check 应为 0");
@@ -141,9 +145,29 @@ check("AC-4 --apply 迁移 lib→src、清扫引用，随后 --check 0 且幂等
 	assertEqual(second.stdout, "aligned\n", "第二次 apply 应零操作");
 });
 
-// ── AC-5 ───────────────────────────────────────────────────────────────────
-check("AC-5 引用清扫之外无改动（非路径行保持不变）", () => {
+// ── AC-4 对抗（verdict-1 语义链另一侧）────────────────────────────────────
+check("对抗：policy-diff 项目 --apply 后 --check 仍 exit 1，人工同步归零", () => {
+	const repo = makeRepo({ withLib: true, withSrc: false, policyDiff: true });
+	const r = run(repo, ["--apply"]);
+	assertEqual(r.code, 0, "apply 本身 exit 0");
+	assert(fs.existsSync(path.join(repo, "src", "a.txt")), "迁移应发生");
+	assert(!Buffer.compare(fs.readFileSync(path.join(repo, ".omp/trio/policy.txt")), Buffer.from("allow dev src/**\n# local escape hatch\n")), "policy 必须保留逃生舱痕迹，不得被 --apply 改写");
+
+	const c = run(repo, ["--check"]);
+	assertEqual(c.code, 1, "policy diff 残留 → --check 应为 1（不被 --apply 消除）");
+	assert(c.stdout.includes("policy"), "残留差异行应是 policy 行");
+
+	// 人工同步（模拟逃生舱消除）后，验收链闭合
+	fs.copyFileSync(UPSTREAM_POLICY, path.join(repo, ".omp/trio/policy.txt"));
+	const c2 = run(repo, ["--check"]);
+	assertEqual(c2.code, 0, "人工同步后 --check 应为 0");
+	assertEqual(c2.stdout, "aligned\n", "人工同步后应为 aligned");
+});
+
+// ── AC-5（verdict-1 V-1 口径：含 policy.txt 零写入）────────────────────────
+check("AC-5(V-1) 引用清扫之外无改动：非路径行 + policy.txt 零写入", () => {
 	const repo = makeRepo({ withLib: true, withSrc: false });
+	const policyBefore = Buffer.from(fs.readFileSync(path.join(repo, ".omp/trio/policy.txt")));
 	run(repo, ["--apply"]);
 	assertEqual(
 		fs.readFileSync(path.join(repo, "src", "a.txt"), "utf8"),
@@ -158,6 +182,8 @@ check("AC-5 引用清扫之外无改动（非路径行保持不变）", () => {
 	const diff = git(repo, ["diff", "HEAD", "--", "docs/note.md"]);
 	assert(diff.includes("-lib/a.txt") && diff.includes("+src/a.txt"), "diff 应只含路径行");
 	assert(diff.includes("keep me"), "diff 不应删除非路径行");
+	assert(!Buffer.compare(fs.readFileSync(path.join(repo, ".omp/trio/policy.txt")), policyBefore), "policy.txt 不在 --apply 写入范围（V-1/ADR-0006 §3.4）");
+	assertEqual(git(repo, ["diff", "HEAD", "--", ".omp/trio/policy.txt"]), "", "policy.txt 的 git diff 必须为空");
 });
 
 // ── 边界 ───────────────────────────────────────────────────────────────────
