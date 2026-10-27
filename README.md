@@ -631,3 +631,58 @@ cmp .omp/trio/policy.txt /path/to/project/.omp/trio/policy.txt
 - **双轨**：回流卡独立于 `feedback/` 7-格反馈条目池，互不混用。
 - 契约：`docs/task/TASK-005-2026-10-27-下游上下文回流/arch-20261027-1940-spec.md`；
   决策：`docs/architecture/ADR-0010-下游需求上下文回流机制.md`。
+
+---
+
+## 16. 三角色产物示例（节选）
+
+> 每个角色只写自己的前缀文件；节选自对应模板，突出「谁产出什么」。
+
+### ARCH —— 契约（`arch-*.md`）
+
+```markdown
+## 4. 验收准则（Given-When-Then）
+
+### AC-1 获取订单列表
+- **Given** 用户已登录且名下有 2 个订单
+- **When**  请求 `GET /api/orders`
+- **Then**  响应 200，`items` 长度 2，每项含 `id: string`、`amount: number`、`created_at: string(ISO-8601)`；`total === items.length`
+```
+
+特点：**接口签名 + 可判定断言**先行，DEV 不猜参数形态；契约不清由 ARCH 补齐。
+
+### DEV —— 交付说明（`dev-*.md`）
+
+```markdown
+## 3. 验收准则实现情况
+| 准则 | 状态 | 说明 |
+| AC-1 | 已实现 | GET /api/orders 返回 items+total，total 与 items.length 一致 |
+| AC-2 | 已实现 | 未登录返回 401 |
+
+## 5. 本地静态检查结果
+$ ruff check src/   → All checks passed!
+$ pyright          → 0 errors
+```
+
+特点：**实现 + 证据**（Files Changed、静态检查真实输出）；版本号与 CHANGELOG 属发布链，DEV 独占。
+
+### QA —— 验收报告（`qa-*.md`）
+
+```markdown
+| 准则 | 结论 | 证据 |
+| AC-1 | PASS | items=2, total=2 |
+| AC-2 | FAIL | 未登录返回 500 而非 401（见 defects/DEF-001） |
+
+**总判定**：FAIL（1 项未通过）
+```
+
+特点：**对抗性**——FAIL 必附期望/实际/复现脚本；发现缺陷只报告，修复是 DEV 的职责；3 轮未全绿 → `blocked`。
+
+### 共同落点 —— 看板（`board.md`）
+
+| 字段 | 值 |
+|---|---|
+| 当前状态 | `implementing` → `qa_passed` → `user_signed` |
+| 最后推进人 | DEV / QA / 用户 |
+
+三方共写；ARCH 裁决、DEV 实现、QA 验证、用户终验签字，状态机串起整条链路。
