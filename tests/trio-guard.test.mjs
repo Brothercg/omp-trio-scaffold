@@ -290,6 +290,176 @@ await expectBlock("[dev] bin/ 其他文件拒绝（fail-closed）", "dev", "writ
 await expectBlock("[dev] templates/ 其他文件拒绝（fail-closed）", "dev", "write",
 	{ path: "templates/pre-commit", content: "x" });
 
+// ── BUG-1 回归：策略生效时机 + 缺失 fail-closed + 双执法面一致 ────────────
+
+console.log("\n[BUG-1 回归：策略变更即时生效 / 缺失 fail-closed / 双执法面一致]");
+
+// 独立 fixture 项目：policy 内容在本测试块内可改写（不触碰脚手架真值源）。
+const BUG_PROJECT = makeProject();
+const bugCall = makeHook(BUG_PROJECT); // 独立 hook 实例（内聚 own cachedRules）
+const POLICY_FIXTURE = path.join(BUG_PROJECT, ".omp", "trio", "policy.txt");
+const setPolicy = (text) => fs.writeFileSync(POLICY_FIXTURE, text);
+
+async function bugAs(role, toolName, input) {
+	const previous = process.env.TRIO_ROLE;
+	if (role === null) delete process.env.TRIO_ROLE;
+	else process.env.TRIO_ROLE = role;
+	try {
+		const result = await bugCall(toolName, input);
+		return { blocked: result?.block === true, reason: result?.reason ?? "" };
+	} finally {
+		if (previous === undefined) delete process.env.TRIO_ROLE;
+		else process.env.TRIO_ROLE = previous;
+	}
+}
+
+// A（AC-1 即时生效）：deny 基线 → 改 policy 为 allow → 不重启进程立即放行。
+await check("A/AC-1 会话外改 allow，同 handler 下一次调用立即放行（不重启进程）", async () => {
+	setPolicy("deny * target.txt\n");
+	assert.equal((await bugAs("dev", "write", { path: "target.txt", content: "x" })).blocked, true,
+		"基线：deny * target.txt 应拦截 dev 写 target.txt");
+	setPolicy("allow dev target.txt\n");
+	const r = await bugAs("dev", "write", { path: "target.txt", content: "x" });
+	assert.equal(r.blocked, false, `同进程新 allow 即时放行失败（缓存不失效）：${r.reason}`);
+});
+
+// B（AC-2 deny 即时生效）：allow 基线 → 改 policy 为 deny → 立即拦截。
+await check("B/AC-2 会话外改 deny，紧急撤权立即拦截（无放行宽于新策略的窗口）", async () => {
+	setPolicy("allow dev target.txt\n");
+	assert.equal((await bugAs("dev", "write", { path: "target.txt", content: "x" })).blocked, false,
+		"基线：allow dev target.txt 应放行");
+	setPolicy("deny * target.txt\n");
+	const r = await bugAs("dev", "write", { path: "target.txt", content: "x" });
+	assert.equal(r.blocked, true, `deny 即时生效失败（安全向 fail-open 窗口）：${r.reason}`);
+});
+
+// C（AC-3 缺失 fail-closed）：删除 policy → 全部 write 拦截，文案含 fail-closed；
+// 纯注释 policy 同为空规则集，必须一并拦截（不得放行）。
+await check("C/AC-3 policy 缺失 → 全部 write 拦截（fail-closed 兑现注释）", async () => {
+	setPolicy("allow dev target.txt\n"); // 先保证有非缺失基线，再删
+	fs.unlinkSync(POLICY_FIXTURE);
+	const r = await bugAs("dev", "write", { path: "anything.txt", content: "x" });
+	assert.equal(r.blocked, true, `缺失 policy 竟被放行（fail-open）：${r.reason}`);
+	assert.match(r.reason, /[Ff]ail[- ]closed|策略缺失/i,
+		`拦截文案未声明 fail-closed：${r.reason}`);
+});
+await check("C2 policy 为纯注释（空规则集）→ 同样 fail-closed，不得放行", async () => {
+	setPolicy("# 只有注释，没有任何规则\n");
+	const r = await bugAs("dev", "write", { path: "anything.txt", content: "x" });
+	assert.equal(r.blocked, true, `纯注释 policy 竟被放行：${r.reason}`);
+	assert.match(r.reason, /[Ff]ail[- ]closed|策略缺失|为空/i, `文案未指明空策略：${r.reason}`);
+});
+
+// D（AC-5 双执法面一致）：同一批路径矩阵分别过 guard 判定与 pre-commit 判定，
+// 断言同结论。pre-commit 面以子进程真实执行（guard fixture → git fixture）。
+await check("D/AC-5 guard 判定与 pre-commit 判定对同一路径矩阵结论一致", async () => {
+	const { execFileSync } = await import("node:child_process");
+	const cases = [
+		{ policy: "allow dev src/**\ndeny * .omp/hooks/**\n", role: "dev", path: "src/a.py", wantBlock: false },
+		{ policy: "allow dev src/**\ndeny * src/secret/**\n", role: "dev", path: "src/secret/k.py", wantBlock: true },
+		{ policy: "allow dev src/**\n", role: "arch", path: "src/a.py", wantBlock: true }, // 无命中 → 拒
+		{ policy: "allow * CHANGELOG.md\n", role: "pm", path: "CHANGELOG.md", wantBlock: false }, // pm→arch 别名
+		{ policy: "allow dev src/**\n", role: "dev", path: "docs/x.md", wantBlock: true }, // 无命中
+		{ policy: "deny * **\nallow dev src/**\n", role: "dev", path: "src/a.py", wantBlock: true }, // deny 优先
+	];
+	for (const tc of cases) {
+		// ① guard 面：独立临时项目 + fresh hook 实例（避免缓存串扰）
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "trio-guard-dual-"));
+		try {
+			fs.mkdirSync(path.join(dir, ".omp", "trio"), { recursive: true });
+			fs.writeFileSync(path.join(dir, ".omp", "trio", "policy.txt"), tc.policy);
+			let handler = null;
+			registerGuard({ on: (e, fn) => (handler = fn) });
+			const prev = process.env.TRIO_ROLE;
+			process.env.TRIO_ROLE = tc.role;
+			let guardBlock;
+			try {
+				const r = await handler({ toolName: "write", input: { path: tc.path, content: "x" } }, { cwd: dir });
+				guardBlock = r?.block === true;
+			} finally {
+				if (prev === undefined) delete process.env.TRIO_ROLE;
+				else process.env.TRIO_ROLE = prev;
+			}
+			assert.equal(guardBlock, tc.wantBlock,
+				`guard 面偏差：role=${tc.role} path=${tc.path} policy=${JSON.stringify(tc.policy)}（want ${tc.wantBlock ? "block" : "allow"}）`);
+
+			// ② pre-commit 面：真实模板以子进程在同一 fixture 形态跑（git init + .omp/trio/policy.txt）
+			const repo = fs.mkdtempSync(path.join(os.tmpdir(), "trio-precommit-"));
+			try {
+				execFileSync("git", ["init", "-q"], { cwd: repo });
+				fs.mkdirSync(path.join(repo, ".omp", "trio"), { recursive: true });
+				fs.writeFileSync(path.join(repo, ".omp", "trio", "policy.txt"), tc.policy);
+				// 待判文件造出 staging 面：写入 tc.path 同形态目录
+				const stagedPath = tc.path;
+				fs.mkdirSync(path.dirname(path.join(repo, stagedPath)), { recursive: true });
+				fs.writeFileSync(path.join(repo, stagedPath), "x");
+				execFileSync("git", ["add", stagedPath], { cwd: repo });
+				let preCommitCode = 0;
+				try {
+					execFileSync(
+						"bash", [path.join(ROOT, "templates", "pre-commit")],
+						{ cwd: repo, env: { ...process.env, TRIO_ROLE: tc.role }, stdio: "pipe" },
+					);
+				} catch (er) {
+					preCommitCode = er.status ?? 1;
+				}
+				const preCommitBlock = preCommitCode !== 0;
+				assert.equal(preCommitBlock, tc.wantBlock,
+					`pre-commit 面偏差：role=${tc.role} path=${tc.path} policy=${JSON.stringify(tc.policy)}（want ${tc.wantBlock ? "block" : "allow"}，exit=${preCommitCode}）`);
+			} finally {
+				fs.rmSync(repo, { recursive: true, force: true });
+			}
+		} finally {
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
+	}
+
+	// 缺失 policy 双面一致：guard 面 fail-closed（A-C 已证），pre-commit 面 exit!=0
+	const repo = fs.mkdtempSync(path.join(os.tmpdir(), "trio-precommit-missing-"));
+	try {
+		execFileSync("git", ["init", "-q"], { cwd: repo });
+		fs.writeFileSync(path.join(repo, "f.txt"), "x");
+		execFileSync("git", ["add", "f.txt"], { cwd: repo });
+		let code = 0;
+		try {
+			execFileSync("bash", [path.join(ROOT, "templates", "pre-commit")], {
+				cwd: repo,
+				env: { ...process.env, TRIO_ROLE: "dev" },
+				stdio: "pipe",
+			});
+		} catch (er) {
+			code = er.status ?? 1;
+		}
+		assert.notEqual(code, 0, "pre-commit 对缺失 policy 竟 exit 0（fail-open）");
+	} finally {
+		fs.rmSync(repo, { recursive: true, force: true });
+	}
+});
+
+// D2：bash 写意图双面（guard 面 vs pre-commit 对等语义：deny 意图为禁写目标）
+await check("D2/AC-5 bash 写意图 guard 拦截与 pre-commit deny 结论一致（deny 语义面）", async () => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "trio-guard-bash-"));
+	try {
+		fs.mkdirSync(path.join(dir, ".omp", "trio"), { recursive: true });
+		fs.writeFileSync(path.join(dir, ".omp", "trio", "policy.txt"), "deny * .omp/trio/**\n");
+		let handler = null;
+		registerGuard({ on: (e, fn) => (handler = fn) });
+		const prev = process.env.TRIO_ROLE;
+		process.env.TRIO_ROLE = "dev";
+		let r;
+		try {
+			r = await handler({ toolName: "bash", input: { command: "echo hi > .omp/trio/policy.txt" } }, { cwd: dir });
+		} finally {
+			if (prev === undefined) delete process.env.TRIO_ROLE; else process.env.TRIO_ROLE = prev;
+		}
+		assert.equal(r?.block, true, "bash 重定向写 deny 面未被 guard 拦截");
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+fs.rmSync(BUG_PROJECT, { recursive: true, force: true });
+
 // ── 汇总 ───────────────────────────────────────────────────────────────────
 
 fs.rmSync(PROJECT, { recursive: true, force: true });
