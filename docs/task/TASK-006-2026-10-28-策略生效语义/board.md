@@ -55,6 +55,9 @@
 - 下一步：DEV 窗口发布 v0.5.1（guard/pre-commit 共享判定器修复版）；
   origin（git@github.com:Brothercg/omp-trio-scaffold）已接入，
   远端 main 停在 `47970a7`（落后本地 9 commit）——push 与 tag 一并由 DEV 执行。
+- 23:23：DEV 发布 `v0.5.1` —— `main 47970a7..3dd30c9`；tag object
+  `161a300`（peeled `3dd30c9`）；远端 main / tag 已落地。发布记录
+  `dev-20261028-2323-release.md`。
 
 ## 5. 交接备注（DEV → QA 第 2 轮）
 
