@@ -2,7 +2,8 @@
 #
 # TRIO 提交门禁 —— git pre-commit 兜底
 #
-# 与 .omp/hooks/pre/trio-guard.ts 共用 .omp/trio/policy.txt 这一份策略真值源。
+# 与 .omp/hooks/pre/trio-guard.ts 共用同一套共享策略判定：
+#   bin/trio-policy-eval.mjs → loadPolicy / decide / describeVerdict
 # 两层职责分工：
 #   - hook      ：实时拦截，阻止越权写入落盘
 #   - pre-commit：提交前复核暂存区，防止绕过 hook 的路径（如手工 git add）
@@ -47,8 +48,7 @@ case "${ROLE,,}" in
 		;;
 esac
 
-# ── 定位项目根与策略文件 ───────────────────────────────────────────────────
-
+# ── 定位项目根与暂存文件 ───────────────────────────────────────────────────
 # 用 --show-toplevel 而非 $GIT_DIR/.. —— 在 linked worktree 中
 # $GIT_DIR 是 <main>/.git/worktrees/<name>，反推会落到 .git/worktrees 上。
 PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
@@ -58,86 +58,36 @@ PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
 PROJECT_ROOT="$(cd "$PROJECT_ROOT" && pwd)"
 POLICY_FILE="${PROJECT_ROOT}/${POLICY_REL}"
 
-if [[ ! -f "$POLICY_FILE" ]]; then
-	log_error "策略文件缺失：${POLICY_REL}"
-	log_error "拒绝提交。恢复策略文件或手动提交（git commit --no-verify）。"
+STAGED="$(git diff --cached --name-only --diff-filter=ACMRDT 2>/dev/null)"
+
+# ── 共享策略判定器 ─────────────────────────────────────────────────────────
+# 直接复用 guard 的 loadPolicy / decide / describeVerdict（单一实现，双面同裁决）。
+# 模板位于 <repo>/templates/ 时从 ../bin 找；安装到 <repo>/.git/hooks/ 时从
+# 项目根的 bin/ 找。找不到即 fail-closed，避免退回各写一套。
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+EVALUATOR=""
+for candidate in \
+	"${SCRIPT_DIR}/../bin/trio-policy-eval.mjs" \
+	"${PROJECT_ROOT}/bin/trio-policy-eval.mjs"; do
+	if [[ -f "$candidate" ]]; then
+		EVALUATOR="$candidate"
+		break
+	fi
+done
+if [[ -z "$EVALUATOR" ]]; then
+	log_error "共享策略判定器缺失：bin/trio-policy-eval.mjs"
+	log_error "拒绝提交（fail-closed）。重跑 bin/init-agent.sh 部署判定器。"
+	exit 1
+fi
+if ! command -v bun >/dev/null 2>&1; then
+	log_error "需要 bun 执行共享策略判定器，但 PATH 中找不到 bun"
+	log_error "安装 bun，或用 git commit --no-verify 人工绕过（不推荐）。"
 	exit 1
 fi
 
-# ── 暂存文件列表 ───────────────────────────────────────────────────────────
-
-STAGED="$(git diff --cached --name-only --diff-filter=ACMRDT 2>/dev/null)"
-if [[ -z "$STAGED" ]]; then
-	exit 0
-fi
-
-# ── 策略解析 ───────────────────────────────────────────────────────────────
-# 与 hook 保持同一套语义：
-#   allow <role> <glob> / deny <role> <glob>
-#   判定顺序：任一 deny 命中 → 拒绝；否则任一 allow 命中 → 允许；否则拒绝。
-
-# 角色匹配含别名：旧版 policy.txt 中写的是 `pm`，而 ROLE 已归一化为 arch。
-# `(r=="arch" && $2=="pm")` 让未迁移的旧策略文件继续生效。
-ROLE_MATCH='$2==r || $2=="*" || (r=="arch" && $2=="pm")'
-
-mapfile -t ALLOW_RULES < <(awk -v r="$ROLE" "\$1==\"allow\" && ($ROLE_MATCH) {print \$3}" "$POLICY_FILE")
-mapfile -t DENY_RULES < <(awk -v r="$ROLE" "\$1==\"deny\" && ($ROLE_MATCH) {print \$3}" "$POLICY_FILE")
-
-# glob → 正则：'*' 匹配任意字符（含 '/'），'**' 等价于 '*'。
-# 路径 glob 的 '*' 跨目录分隔符，与 hook 侧 matchGlob 的语义一致。
-glob_to_regex() {
-	local glob="$1"
-	printf '%s' "$glob" | sed -e 's/[.+^${}()|[\]\\]/\\&/g' -e 's/\*\*/.*/g' -e 's/\*/.*/g'
-}
-
-match_glob() {
-	local glob="$1" path="$2"
-	if [[ "$glob" == *"/**" ]]; then
-		local prefix="${glob%/**}"
-		[[ "$path" == "$prefix" || "$path" == "$prefix"/* ]]
-		return
-	fi
-	local regex
-	regex="$(glob_to_regex "$glob")"
-	[[ "$path" =~ $regex ]]
-}
-
-# ── 逐文件判定 ─────────────────────────────────────────────────────────────
-
-violations=()
-
-while IFS= read -r file; do
-	[[ -z "$file" ]] && continue
-
-	denied=""
-	for glob in ${DENY_RULES[@]+"${DENY_RULES[@]}"}; do
-		if match_glob "$glob" "$file"; then
-			denied="$glob"
-			break
-		fi
-	done
-	if [[ -n "$denied" ]]; then
-		violations+=("${file}  （命中禁止规则：${denied}）")
-		continue
-	fi
-
-	allowed=""
-	for glob in ${ALLOW_RULES[@]+"${ALLOW_RULES[@]}"}; do
-		if match_glob "$glob" "$file"; then
-			allowed="$glob"
-			break
-		fi
-	done
-	if [[ -z "$allowed" ]]; then
-		violations+=("${file}  （不在 ${ROLE} 的写入白名单内）")
-	fi
-done <<<"$STAGED"
-
-# ── 裁决 ───────────────────────────────────────────────────────────────────
-
-if [[ ${#violations[@]} -gt 0 ]]; then
-	log_error "TRIO 门禁：${ROLE} 的越权提交被拒绝（${#violations[@]} 个文件）"
-	printf '  - %s\n' "${violations[@]}" >&2
+if ! printf '%s\n' "$STAGED" | bun "$EVALUATOR" --policy "$POLICY_FILE" --role "$ROLE" --stdin; then
+	log_error "TRIO 门禁：${ROLE} 的越权提交被拒绝"
 	log_error "策略来源：${POLICY_REL}"
 	log_error "若为误判，请修改 ${POLICY_REL} 后重试，或人工提交（git commit --no-verify）。"
 	exit 1

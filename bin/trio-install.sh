@@ -96,6 +96,7 @@ for required in \
 	"bin/trio-selftest.sh" \
 	"bin/trio-tmux.sh" \
 	"bin/trio-check-report.mjs" \
+	"bin/trio-policy-eval.mjs" \
 	"templates/pre-commit" \
 	".omp/trio/policy.txt" \
 	".omp/hooks/pre/trio-guard.ts" \

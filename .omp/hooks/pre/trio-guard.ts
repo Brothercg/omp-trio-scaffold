@@ -21,9 +21,10 @@
 import type { HookAPI } from "@oh-my-pi/pi-coding-agent/extensibility/hooks";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { createHash } from "node:crypto";
 
 type Role = "arch" | "dev" | "qa";
-type Verdict = { allowed: true } | { allowed: false; reason: string };
+type Verdict = { allowed: boolean; rule?: Rule; reason: string };
 
 const ROLES: readonly Role[] = ["arch", "dev", "qa"];
 
@@ -58,19 +59,99 @@ interface Rule {
 
 const POLICY_RELATIVE_PATH = path.join(".omp", "trio", "policy.txt");
 
+export interface PolicySnapshot {
+	rules: Rule[];
+	mtimeMs: number;
+	digest: string;
+	/** 快照来源；用于 describeVerdict 检测判定后文件是否已变化。 */
+	policyPath?: string;
+}
+
+export interface FailClosed {
+	failClosed: true;
+	reason: "policy 缺失" | "policy 不可解析" | "policy 不可读";
+}
+
+const policyCache = new Map<string, PolicySnapshot>();
+
+function snapshotDigest(text: string): string {
+	return createHash("sha256").update(text).digest("hex");
+}
+
+/**
+ * 共享策略加载器：按 mtimeMs + digest 校验快照，任一变化即重解析。
+ * 缺失 / 不可读 / 不可解析返回 FailClosed；空策略返回 rules=[] 的合法快照。
+ */
+export function loadPolicy(policyPath: string): PolicySnapshot | FailClosed {
+	let stat: fs.Stats;
+	try {
+		stat = fs.statSync(policyPath);
+	} catch (error) {
+		const code = (error as NodeJS.ErrnoException).code;
+		return { failClosed: true, reason: code === "ENOENT" ? "policy 缺失" : "policy 不可读" };
+	}
+	if (!stat.isFile()) return { failClosed: true, reason: "policy 不可读" };
+
+	let text: string;
+	try {
+		text = fs.readFileSync(policyPath, "utf8");
+	} catch {
+		return { failClosed: true, reason: "policy 不可读" };
+	}
+
+	const digest = snapshotDigest(text);
+	const mtimeMs = stat.mtimeMs;
+	const cached = policyCache.get(policyPath);
+	if (cached !== undefined && cached.mtimeMs === mtimeMs && cached.digest === digest) {
+		return cached;
+	}
+
+	let rules: Rule[];
+	try {
+		rules = parsePolicy(text);
+	} catch {
+		return { failClosed: true, reason: "policy 不可解析" };
+	}
+	const snapshot: PolicySnapshot = { rules, mtimeMs, digest, policyPath };
+	policyCache.set(policyPath, snapshot);
+	return snapshot;
+}
+
+/** 共享文案：判定理由 + 快照标识（digest 前 8 位 + mtimeMs）。 */
+export function describeVerdict(verdict: Verdict, snapshot: PolicySnapshot): string {
+	const label = snapshot.digest.slice(0, 8);
+	let text = `${verdict.reason}\n快照：${label}（mtimeMs ${snapshot.mtimeMs}）`;
+	if (snapshot.policyPath !== undefined) {
+		try {
+			const current = snapshotDigest(fs.readFileSync(snapshot.policyPath, "utf8"));
+			if (current !== snapshot.digest) {
+				text += `\n当前策略 digest：${current.slice(0, 8)}；策略已更新，本次仍按旧快照 ${label} 执法。`;
+			}
+		} catch {
+			text += `\n当前策略不可读；本次仍按旧快照 ${label} 执法。`;
+		}
+	}
+	return text;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 策略解析
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function parsePolicy(text: string): Rule[] {
 	const rules: Rule[] = [];
-	for (const rawLine of text.split("\n")) {
-		const line = rawLine.trim();
+	const lines = text.split("\n");
+	for (let index = 0; index < lines.length; index++) {
+		const line = lines[index].trim();
 		if (line.length === 0 || line.startsWith("#")) continue;
 		const parts = line.split(/\s+/);
-		if (parts.length !== 3) continue;
+		if (parts.length !== 3) {
+			throw new Error(`policy 不可解析：第 ${index + 1} 行字段数 ${parts.length}`);
+		}
 		const [kind, role, glob] = parts;
-		if (kind !== "allow" && kind !== "deny") continue;
+		if (kind !== "allow" && kind !== "deny") {
+			throw new Error(`policy 不可解析：第 ${index + 1} 行 kind "${kind}"`);
+		}
 		let normalizedRole: Role | "*";
 		if (role === "*") {
 			normalizedRole = "*";
@@ -104,23 +185,37 @@ function matchGlob(glob: string, relativePath: string): boolean {
 
 /**
  * deny 优先的白名单判定。未命中任何 allow → 拒绝（fail-closed）。
+ * 兼容既有 `decide(rules, role, path)`：首个参数可为 PolicySnapshot 或 Rule[]。
  */
-export function decide(rules: readonly Rule[], roleInput: string, relativePath: string): Verdict {
-	// 别名在此归一化，因此 `decide(rules, "pm", path)` 与 `"arch"` 等价。
-	const role = normalizeRole(roleInput);
+export function decide(
+	snapshotOrRules: PolicySnapshot | readonly Rule[],
+	roleInput: string,
+	relativePath: string,
+): Verdict {
+	const rules = Array.isArray(snapshotOrRules) ? snapshotOrRules : snapshotOrRules.rules;
+	// 别名在此归一化，因此 `decide(..., "pm", path)` 与 `"arch"` 等价。
+	const role = roleInput === "*" ? "*" : normalizeRole(roleInput);
 	if (role === null) {
 		return { allowed: false, reason: `未知角色 "${roleInput}"，按 fail-closed 拒绝写入 "${relativePath}"` };
 	}
 	const applicable = rules.filter(rule => rule.role === "*" || rule.role === role);
 	const denied = applicable.find(rule => !rule.allow && matchGlob(rule.glob, relativePath));
 	if (denied) {
-		return { allowed: false, reason: `路径 "${relativePath}" 命中禁止规则 (${denied.role} ${denied.glob})` };
+		return {
+			allowed: false,
+			rule: denied,
+			reason: `路径 "${relativePath}" 命中禁止规则 (${denied.role} ${denied.glob})`,
+		};
 	}
 	const allowed = applicable.find(rule => rule.allow && matchGlob(rule.glob, relativePath));
 	if (allowed) {
-		return { allowed: true };
+		return {
+			allowed: true,
+			rule: allowed,
+			reason: `路径 "${relativePath}" 命中允许规则 (${allowed.role} ${allowed.glob})`,
+		};
 	}
-	return { allowed: false, reason: `路径 "${relativePath}" 不在 ${ROLE_LABEL[role]} 的写入白名单内` };
+	return { allowed: false, reason: `路径 "${relativePath}" 不在 ${ROLE_LABEL[role] ?? role} 的写入白名单内` };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -456,8 +551,8 @@ function segmentTargets(words: readonly string[], redirectTargets: readonly stri
 	return targets;
 }
 
-function bashTargetsForbidden(command: string, forbiddenRelatives: readonly string[]): string[] {
-	if (forbiddenRelatives.length === 0) return [];
+/** 抽取命令中的真实写入目标；只做词法归并，不按策略过滤。 */
+function bashTargets(command: string): string[] {
 	const tokens = tokenizeShell(command);
 	const hits: string[] = [];
 	let words: string[] = [];
@@ -489,11 +584,20 @@ function bashTargetsForbidden(command: string, forbiddenRelatives: readonly stri
 	}
 	flush();
 
+	return [
+		...new Set(
+			hits
+				// 去掉引号与尾斜杠：'tests/' 与 'tests' 指向同一目录。
+				.map(token => token.replace(/^["']|["']$/g, "").replace(/\/+$/, ""))
+				.filter(token => token.length > 0),
+		),
+	];
+}
+
+function bashTargetsForbidden(command: string, forbiddenRelatives: readonly string[]): string[] {
+	if (forbiddenRelatives.length === 0) return [];
 	const matched: string[] = [];
-	for (const token of hits) {
-		// 去掉引号与尾斜杠：'tests/' 与 'tests' 指向同一目录。
-		const normalized = token.replace(/^["']|["']$/g, "").replace(/\/+$/, "");
-		if (normalized.length === 0) continue;
+	for (const normalized of bashTargets(command)) {
 		for (const forbidden of forbiddenRelatives) {
 			const base = forbidden.endsWith("/**") ? forbidden.slice(0, -3) : forbidden;
 			// 命中：完全相等，或位于该目录之下（含目录本身）。
@@ -572,6 +676,25 @@ function inputPaths(toolName: string, input: Record<string, unknown>): string[] 
 	}
 }
 
+/** 策略不可用时，判断本次工具调用是否构成受控写意图。 */
+function isControlledWrite(toolName: string, input: Record<string, unknown>): boolean {
+	switch (toolName) {
+		case "write":
+		case "edit":
+		case "ast_edit":
+			return true;
+		case "bash": {
+			const command = typeof input.command === "string" ? input.command : "";
+			return command.length > 0 && bashTargets(command).length > 0;
+		}
+		case "lsp":
+		case "eval":
+			return inputPaths(toolName, input).length > 0;
+		default:
+			return false;
+	}
+}
+
 /**
  * 从 Python/JS 代码里抽取**真实写入目标**，不抽取普通字符串字面量。
  * AC-3：内容里出现 "tests/x.test.mjs" 不应触发；只有 open()/writeFile()
@@ -599,7 +722,6 @@ function extractPathsFromCode(code: string): string[] {
 
 export default function (pi: HookAPI) {
 	let cachedRoot: string | null = null;
-	let cachedRules: Rule[] | null = null;
 
 	function projectRoot(ctx: { cwd: string }): string {
 		if (cachedRoot === null) {
@@ -608,45 +730,77 @@ export default function (pi: HookAPI) {
 		return cachedRoot;
 	}
 
-	function loadRules(root: string): Rule[] {
-		if (cachedRules !== null) return cachedRules;
-		const policyPath = path.join(root, POLICY_RELATIVE_PATH);
-		try {
-			cachedRules = parsePolicy(fs.readFileSync(policyPath, "utf8"));
-		} catch {
-			// 策略文件缺失 → 空规则集 → fail-closed（全部拒绝写入）。
-			cachedRules = [];
-		}
-		return cachedRules;
-	}
-
 	pi.on("tool_call", async (event, ctx) => {
 		// TRIO_ROLE=pm 是 arch 的兼容别名，归一化后统一按 arch 判定。
 		const role = normalizeRole(process.env.TRIO_ROLE);
 		if (role === null) return undefined;
 
 		const root = projectRoot(ctx);
-		const rules = loadRules(root);
-		if (rules.length === 0) return undefined;
-
 		const input = (event.input ?? {}) as Record<string, unknown>;
 		const toolName = event.toolName;
+		const policyPath = path.join(root, POLICY_RELATIVE_PATH);
+		// 每次判定加载共享快照：mtimeMs + digest 任一变化即重读。
+		const loaded = loadPolicy(policyPath);
+
+		if ("failClosed" in loaded) {
+			if (!isControlledWrite(toolName, input)) return undefined;
+			const command = typeof input.command === "string" ? input.command : "";
+			const targets = inputPaths(toolName, input);
+			const detail =
+				toolName === "bash"
+					? `命令：${command}`
+					: `目标：${targets.length > 0 ? targets.join(", ") : "(未提供路径)"}`;
+			return {
+				block: true,
+				reason:
+					`TRIO 门禁：${ROLE_LABEL[role]} 的写入已被拦截。\n` +
+					`策略判定 fail-closed：${loaded.reason}。\n` +
+					`${detail}\n` +
+					`策略来源：${POLICY_RELATIVE_PATH}`,
+			};
+		}
+
+		const rules = loaded.rules;
+		const command = typeof input.command === "string" ? input.command : "";
+
+		if (rules.length === 0) {
+			if (!isControlledWrite(toolName, input)) return undefined;
+			const targets = inputPaths(toolName, input);
+			const detail =
+				toolName === "bash"
+					? `命令：${command}`
+					: `目标：${targets.length > 0 ? targets.join(", ") : "(未提供路径)"}`;
+			const verdict: Verdict = { allowed: false, reason: "策略为空，fail-closed（无 allow 规则）" };
+			return {
+				block: true,
+				reason:
+					`TRIO 门禁：${ROLE_LABEL[role]} 的写入已被拦截。\n` +
+					`${describeVerdict(verdict, loaded)}\n` +
+					`${detail}\n` +
+					`策略来源：${POLICY_RELATIVE_PATH}`,
+			};
+		}
 
 		// bash 走单独的判定：写意图 AND 禁写路径 同时命中才拦。
 		if (toolName === "bash") {
-			const command = typeof input.command === "string" ? input.command : "";
 			if (command.length === 0) return undefined;
 			const forbidden = rules
 				.filter(rule => !rule.allow && (rule.role === "*" || rule.role === role))
 				.map(rule => rule.glob);
 			const hits = bashTargetsForbidden(command, forbidden);
 			if (hits.length === 0) return undefined;
+			const verdict: Verdict = {
+				allowed: false,
+				reason: `命令写目标 ${hits.join(", ")} 命中禁止规则`,
+			};
 			return {
 				block: true,
 				reason:
 					`TRIO 门禁：${ROLE_LABEL[role]} 不得写入 ${hits.join(", ")}。\n` +
 					`命令：${command}\n` +
-					`若这是误判（例如只是读取该目录），请改用不触达写意图的形式。`,
+					`${describeVerdict(verdict, loaded)}\n` +
+					`若这是误判（例如只是读取该目录），请改用不触达写意图的形式。\n` +
+					`策略来源：${POLICY_RELATIVE_PATH}`,
 			};
 		}
 
@@ -657,8 +811,8 @@ export default function (pi: HookAPI) {
 		for (const target of targets) {
 			const relative = toRelativePath(target, root);
 			if (relative === null) continue;
-			const verdict = decide(rules, role, relative);
-			if (!verdict.allowed) violations.push(verdict.reason);
+			const verdict = decide(loaded, role, relative);
+			if (!verdict.allowed) violations.push(describeVerdict(verdict, loaded));
 		}
 		if (violations.length === 0) return undefined;
 
