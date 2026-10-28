@@ -458,6 +458,76 @@ await check("D2/AC-5 bash 写意图 guard 拦截与 pre-commit deny 结论一致
 	}
 });
 
+// 第 2 轮对抗边界（spec v1 §6）：
+// E 空文件 / F 非法行整份失效 / G mtime 不变 digest 变 / H 不可读 / I 非法行不静默跳过 allow
+await check("E/AC-3 policy 空文件 → 合法快照 rules=[]，write fail-closed（无 allow 命中）", async () => {
+	setPolicy("");
+	const r = await bugAs("dev", "write", { path: "anything.txt", content: "x" });
+	assert.equal(r.blocked, true, `空文件竟被放行：${r.reason}`);
+	assert.match(r.reason, /策略为空|无 allow|fail-closed/i, `空文件文案缺原因：${r.reason}`);
+});
+
+await check("F/AC-3 非法行 → 整份策略不可解析 fail-closed（含合法行也不生效）", async () => {
+	setPolicy("allow dev anything.txt\nkind bad/line\n"); // 第 2 行非法 → 整份失效
+	const r1 = await bugAs("dev", "write", { path: "anything.txt", content: "x" });
+	assert.equal(r1.blocked, true, `合法行旁边 有非法行，竟被 allow 静默放行（fail-open）：${r1.reason}`);
+	assert.match(r1.reason, /不可解析|策略缺失/i, `非法行文案原因缺失：${r1.reason}`);
+	const r2 = await bugAs("dev", "write", { path: "tests/a.py", content: "x" });
+	assert.equal(r2.blocked, true, "整份失效邻域判定也不放行");
+});
+
+await check("F2/AC-3 非法 kind（read）→ 整份不可解析；deny 行不得被吞", async () => {
+	setPolicy("deny * secret.txt\nread dev secret.txt\n");
+	const r = await bugAs("dev", "write", { path: "secret.txt", content: "x" });
+	assert.equal(r.blocked, true, `非法 kind 行未被识别，deny 语义被破坏：${r.reason}`);
+	assert.match(r.reason, /不可解析/i, `文案未按「-policy 不可解析」声明：${r.reason}`);
+});
+
+await check("G/AC-4 mtime 未变但内容变（digest 变）→ 以 digest 为准重用新策略", async () => {
+	setPolicy("deny * g.txt\n");
+	assert.equal((await bugAs("dev", "write", { path: "g.txt", content: "x" })).blocked, true, "基线 deny 拦截");
+	// 不重启进程改 policy，并把 mtime 拨回以伪造「mtime 不变」
+	setPolicy("allow dev g.txt\n");
+	const now = Date.now() / 1000;
+	fs.utimesSync(POLICY_FIXTURE, now, now);
+	const r = await bugAs("dev", "write", { path: "g.txt", content: "x" });
+	assert.equal(r.blocked, false, `mtime 相同 digest 变化时未重读（比对不完整）：${r.reason}`);
+});
+
+await check("H/AC-5 拦截文案含快照标识（digest 8 位 + mtimeMs）", async () => {
+	setPolicy("deny * h.txt\n");
+	const r = await bugAs("dev", "write", { path: "h.txt", content: "x" });
+	assert.match(r.reason, /快照：[0-9a-f]{8}.mtimeMs \d+./u, `文案缺快照标识：${r.reason}`);
+});
+
+await check("I/AC-5 [dev] deny→[qa] deny：判定面换角色后访问同一目标，各自文案独立快照（不串扰）", async () => {
+	setPolicy("deny * i.txt\n");
+	const rDev = await bugAs("dev", "write", { path: "i.txt", content: "x" });
+	assert.match(rDev.reason, /快照：[0-9a-f]{8}/u, `dev 文案缺快照标识：${rDev.reason}`);
+	const rQa = await bugAs("qa", "write", { path: "i.txt", content: "x" });
+	assert.equal(rQa.blocked, true, `qa 未被 deny * 拦截：${rQa.reason}`);
+	assert.match(rQa.reason, /快照：[0-9a-f]{8}/u, `qa 文案缺快照标识：${rQa.reason}`);
+	assert.match(rQa.reason, /命中禁止规则/, `qa 未声明 deny 命中：${rQa.reason}`);
+});
+
+await check("I2/AC-5 判定后外部变更策略 → 同 handler 下一次判定按新快照执法（旧快照不留存）", async () => {
+	setPolicy("deny * i.txt\n");
+	const r1 = await bugAs("dev", "write", { path: "i.txt", content: "x" });
+	assert.match(r1.reason, /快照：[0-9a-f]{8}/u, `第一次文案缺快照标识：${r1.reason}`);
+	const snap1 = r1.reason.match(/快照：([0-9a-f]{8})/u)[1];
+	setPolicy("allow dev i.txt\n"); // 会话外变更
+	const r2 = await bugAs("dev", "write", { path: "i.txt", content: "x" });
+	assert.equal(r2.blocked, false, `外部变更后仍按旧快照 ${snap1} 执法（AC-4 违反）：${r2.reason}`);
+});
+
+await check("J/AC-1+AC-5 deny→allow 变更后第一次判定：文案/结果一致为放行（即时间边界）", async () => {
+	setPolicy("deny * j.txt\n");
+	assert.equal((await bugAs("dev", "write", { path: "j.txt", content: "x" })).blocked, true, "基线 deny 拦截");
+	setPolicy("allow dev j.txt\n");
+	const r = await bugAs("dev", "write", { path: "j.txt", content: "x" });
+	assert.equal(r.blocked, false, `deny→allow 边界未即时换新快照：${r.reason}`);
+});
+
 fs.rmSync(BUG_PROJECT, { recursive: true, force: true });
 
 // ── 汇总 ───────────────────────────────────────────────────────────────────

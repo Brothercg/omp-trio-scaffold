@@ -12,10 +12,10 @@
 
 | 字段 | 值 |
 |---|---|
-| 当前状态 | `testing`（DEV 已落共享判定语义，待 QA 第 2 轮复测） |
-| 最后推进人 | `DEV`（实现完成，交 QA） |
-| 最后更新 | `2026-10-28 22:48` |
-| qa_report | `docs/task/TASK-006-2026-10-28-策略生效语义/qa-20261028-2015-report-策略生效语义-第1轮.md`（第 1 轮修复前基线；第 2 轮待 QA 产出） |
+| 当前状态 | `qa_passed`（QA 第 2 轮复测全绿：15 例回归 0 失败，AC-1..AC-6 全通过；等 user_signed） |
+| 最后推进人 | `QA` |
+| 最后更新 | `2026-10-28 23:11` |
+| qa_report | `docs/task/TASK-006-2026-10-28-策略生效语义/qa-20261028-2311-report-策略生效语义-第2轮.md`（过 `bin/trio-check-report.mjs`） |
 
 ## 2. 验收准则进度
 
@@ -23,14 +23,20 @@
 
 | AC | 契约 | 实现 | 验证 | 状态 |
 |---|---|---|---|---|
-| AC-1 新增 allow 即时生效 | ☑ | ☑ | ☐ | 实现完成（`loadPolicy` mtime+digest），待 QA 第 2 轮 |
-| AC-2 新增 deny 即时生效 | ☑ | ☑ | ☐ | 实现完成（无旧快照窗口），待 QA 第 2 轮 |
-| AC-3 缺失/不可解析 fail-closed | ☑ | ☑ | ☐ | 实现完成（缺失/不可读/非法行/空策略分流），待 QA 第 2 轮 |
-| AC-4 判定与当前策略一致 | ☑ | ☑ | ☐ | 实现完成（mtime+digest 重读），待 QA 第 2 轮 |
-| AC-5 文案含快照标识 | ☑ | ☑ | ☐ | 实现完成（`describeVerdict` 8 位 digest + mtimeMs + 旧快照告警），待 QA 第 2 轮 |
-| AC-6 guard/pre-commit 同裁决 | ☑ | ☑ | ☑ | 已通过（第 1 轮 D/D2 基线；共享 CLI 接线后本地 74/0） |
+| AC-1 新增 allow 即时生效 | ☑ | ☑ | ☑ | 通过（qa-20261028-2311：A/AC-1；deny→allow 无重启即时放行） |
+| AC-2 新增 deny 即时生效 | ☑ | ☑ | ☑ | 通过（B/AC-2；紧急撤权无 fail-open 窗口） |
+| AC-3 缺失/不可解析 fail-closed | ☑ | ☑ | ☑ | 通过（C/C2/E/F/F2：缺失/空/纯注释/非法行整份失效四态全绿，文案明示原因） |
+| AC-4 判定与当前策略一致 | ☑ | ☑ | ☑ | 通过（G/I2/J：mtime 不变 digest 变仍重读；旧快照不留存；deny→allow 边界即时） |
+| AC-5 文案含快照标识 | ☑ | ☑ | ☑ | 通过（H/I：`快照：<8 位>（mtimeMs N）`；多角色不串扰） |
+| AC-6 guard/pre-commit 同裁决 | ☑ | ☑ | ☑ | 通过（D/D2/K：共享判定器 `bin/trio-policy-eval.mjs`，pre-commit 实际走 CLI，矩阵 6/6 双面一致 + 缺失双拒，无角色直调证据见报告 §3） |
 
 ## 3. 迭代日志
+
+- 23:11：QA 第 2 轮复测全绿 —— 修复 `6ac8766` 后 15 例回归（A/B/C/C2/D/D2 第 1 轮遗留
+  翻红为绿 + 新增 E/F/F2/G/H/I/I2/J 八例 §6 对抗边界 + K CLI 直调）0 失败；
+  selftest --fast 20/0；repro 脚本 exit 0（打印「BUG-1①/② 修复已生效」）；
+  AC-6 无角色直调证据：pre-commit 走 `bin/trio-policy-eval.mjs`（双向 1 / 只 allow 0 /
+  缺失 policy 1）；7 套件回归一致；报告 qa-20261028-2311 过校验器；③ done → 等 user_signed
 
 - 20:15：QA 第 1 轮修复前基线 —— tests/trio-guard.test.mjs 增 6 例回归（A/B/C/C2/D/D2，fixture policy 隔离，不触真值源）；实测 guard 套件 70 项失败 4（A/B/C/C2 全红 = BUG-1 双子缺陷实锤：`:612` 终身缓存、`:630` fail-open），D/D2 绿（双执法面同裁决成立、pre-commit 面正确）；其余 6 套件回归全绿；selftest --fast 19/1（唯红色即 guard 套件 4 例的传播）；报告过校验器。修复前基线交付，转 DEV 实现。
 - 22:48：DEV 修复落地 `6ac8766`（无 TRIO_ROLE 维护会话，commit body 已记 accounted）——`loadPolicy` mtime+digest、非法行整份失效、空策略 fail-closed、`describeVerdict` 快照标识；`pre-commit` 改调共享 `bin/trio-policy-eval.mjs`。真实仓库 7 套件全绿（guard 74/0、policy 140/0、align 13/0、check-report 47/0、gate-contract 12/0、pre-push 21/0、reply 28/0）；`selftest --fast` 20/0；`init-agent` 已安装新 pre-commit。DEV 交 QA 第 2 轮。
