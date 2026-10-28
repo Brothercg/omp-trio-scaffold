@@ -6,6 +6,29 @@
 格式：每版本一节，条目按「新增 / 修改 / 修复 / 弃用」分组，注明关联任务或 ADR。
 -->
 
+## Unreleased — 2026-10-28
+
+策略生效语义与双执法面同裁决（TASK-006 / ADR-0011；修复 BUG-1）。
+
+### 修复
+- `trio-guard` 删除进程内终身策略缓存：`loadPolicy` 按 `mtimeMs` +
+  `digest` 校验快照，变更即重读；新增 allow / deny 在下一个工具调用生效。
+- 策略缺失 / 不可读 / 非法行整份不可解析一律 fail-closed；空策略（空文件 /
+  纯注释）同样拒绝写入，文案明示原因。
+- 拦截文案附 8 位策略 digest + `mtimeMs`；检测到判定后策略已变化时明示
+  「按旧快照执法」。
+- `pre-commit` 改为消费共享判定器 `bin/trio-policy-eval.mjs`（复用 guard 的
+  `loadPolicy` / `decide` / `describeVerdict`），双执法面同裁决；判定器
+  缺失或 bun 缺失时 fail-closed。
+- `bin/init-agent.sh` / `bin/trio-install.sh` 部署并校验
+  `bin/trio-policy-eval.mjs`。
+
+### 测试
+- `trio-guard` 74/0（含 QA A/B/C/C2/D/D2 六例回归）；`trio-policy` 140/0；
+  `trio-align` 13/0；`trio-check-report` 47/0；`trio-gate-contract` 12/0；
+  `trio-pre-push` 21/0；`trio-reply-conventions` 28/0。
+- `bin/trio-selftest.sh --fast` 20/0。
+
 ## v0.5.0 — 2026-10-27
 
 下游需求上下文回流机制（回流卡，TASK-005 / ADR-0010）。
