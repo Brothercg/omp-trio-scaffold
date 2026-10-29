@@ -70,20 +70,43 @@ PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
 PROJECT_ROOT="$(cd "$PROJECT_ROOT" && pwd)"
 POLICY_FILE="${PROJECT_ROOT}/${POLICY_REL}"
 
-# AC-5：执法件版本自证（与 guard / pre-push 同判）——声明缺失/不符 fail-closed。
+# BUG-2 / AC-5：严格解析 gate-version —— 必须恰好一行 ^# gate-version: <十进制整数>$。
+# 缺行 / 重复 / 任一行非法（1.5、1abc、CRLF、缩进等）一律 fail-closed；三面同判。
 check_gate_version() {
-	local declared
-	if [[ ! -f "$POLICY_FILE" ]]; then
-		log_error "执法件版本漂移：policy 缺失（缺 # gate-version 声明）"
+	local policy="$1" line digits count=0 value="" malformed="" saw=0
+	if [[ ! -f "$policy" ]]; then
+		log_error "执法件版本漂移：gate-version 声明缺失（policy 不可读）"
 		return 1
 	fi
-	declared="$(sed -n 's/^# gate-version:[[:space:]]*\([0-9][0-9]*\).*$/\1/p' "$POLICY_FILE" | head -1)"
-	if [[ -z "$declared" ]]; then
-		log_error "执法件版本漂移：# gate-version 声明缺失"
+	while IFS= read -r line || [[ -n "$line" ]]; do
+		if [[ "$line" != "# gate-version:"* ]]; then continue; fi
+		saw=1
+		if [[ "$line" =~ ^"# gate-version: "([0-9]+)$ ]]; then
+			digits="${BASH_REMATCH[1]}"
+			if (( ${#digits} > 15 )); then
+				malformed="$line"
+				continue
+			fi
+			count=$((count + 1))
+			value="$((10#$digits))"
+		else
+			malformed="$line"
+		fi
+	done <"$policy"
+	if [[ -n "$malformed" ]]; then
+		log_error "执法件版本漂移：gate-version 声明非法（${malformed}）"
 		return 1
 	fi
-	if [[ "$declared" != "$EXPECTED_GATE_VERSION" ]]; then
-		log_error "执法件版本漂移：policy 声明 ${declared} ≠ 执法件内嵌 ${EXPECTED_GATE_VERSION}"
+	if [[ "$saw" -eq 0 || "$count" -eq 0 ]]; then
+		log_error "执法件版本漂移：gate-version 声明缺失"
+		return 1
+	fi
+	if [[ "$count" -gt 1 ]]; then
+		log_error "执法件版本漂移：gate-version 声明重复（必须恰好一行）"
+		return 1
+	fi
+	if [[ "$value" != "$EXPECTED_GATE_VERSION" ]]; then
+		log_error "执法件版本漂移：policy 声明 ${value} ≠ 执法件内嵌 ${EXPECTED_GATE_VERSION}"
 		return 1
 	fi
 	return 0
@@ -91,7 +114,7 @@ check_gate_version() {
 
 STAGED="$(git diff --cached --name-only --diff-filter=ACMRDT 2>/dev/null)"
 
-check_gate_version || exit 1
+check_gate_version "$POLICY_FILE" || exit 1
 
 # ── 共享策略判定器 ─────────────────────────────────────────────────────────
 # 直接复用 guard 的 loadPolicy / decide / describeVerdict（单一实现，双面同裁决）。

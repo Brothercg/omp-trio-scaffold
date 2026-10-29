@@ -128,7 +128,7 @@ await expectBlock("DEV 写已废止的 docs/specs/ 拦截", "dev", "write", {
 console.log("\n[无角色 / 非法角色]");
 
 await expectAllow("未设置 TRIO_ROLE 时不做拦截", null, "write", { path: "tests/a.py", content: "x" });
-await expectAllow("非法角色不做拦截", "intern", "write", { path: "tests/a.py", content: "x" });
+await expectBlock("非法角色 fail-closed（BUG-3）", "intern", "write", { path: "tests/a.py", content: "x" });
 await expectAllow("TRIO_ROLE=pm 别名等价 arch", "pm", "write", {
 	path: `${TASK}/arch-20261025-0900-spec.md`,
 	content: "x",
@@ -718,6 +718,140 @@ fs.rmSync(WT2, { recursive: true, force: true });
 fs.rmSync(BUG_PROJECT, { recursive: true, force: true });
 
 // ── 汇总 ───────────────────────────────────────────────────────────────────
+
+// ── TASK-007 缺陷修复回归：BUG-1/2/3 ───────────────────────────────────────
+
+console.log("\n[BUG-1 -t/--target-directory 写目标抽取]");
+
+async function rawAs(role, toolName, input) {
+	const previous = process.env.TRIO_ROLE;
+	if (role === undefined) delete process.env.TRIO_ROLE;
+	else process.env.TRIO_ROLE = role;
+	try {
+		return await call(toolName, input);
+	} finally {
+		if (previous === undefined) delete process.env.TRIO_ROLE;
+		else process.env.TRIO_ROLE = previous;
+	}
+}
+
+for (const [label, command] of [
+	["cp -t src/ /tmp/f", "cp -t src/ /tmp/f"],
+	["cp --target-directory=src /tmp/f", "cp --target-directory=src /tmp/f"],
+	["cp --target-directory src /tmp/f", "cp --target-directory src /tmp/f"],
+	["install -t src f", "install -t src f"],
+	["ln -s -t src f", "ln -s -t src f"],
+	["rsync --delete src/ src/x", "rsync --delete src/ src/x"],
+	["cp -- -t src（-- 后按位置参数）", "cp -- -t src"],
+	["install -o USER /tmp/f src/x（选项值不吞目标）", "install -o USER /tmp/f src/x"],
+]) {
+	await check(`BUG-1 BLOCK：${label}`, async () => {
+		const r = await rawAs("arch", "bash", { command });
+		assert.equal(r?.block, true, `应拒绝：${command}`);
+		assert.match(r.reason, /src/u, "原因应明示写目标 src");
+	});
+}
+
+await check("BUG-1 正例不误伤：cp /tmp/f src/x 作为 dev 仍按目标 src/x 放行", async () => {
+	const r = await rawAs("dev", "bash", { command: "cp /tmp/f src/x" });
+	assert.notEqual(r?.block, true, `合法写被误拦：${r?.reason}`);
+});
+
+await check("BUG-1 正例不误伤：ln -s /tmp/f src/link 作为 dev 放行", async () => {
+	const r = await rawAs("dev", "bash", { command: "ln -s /tmp/f src/link" });
+	assert.notEqual(r?.block, true, `合法 ln 被误拦：${r?.reason}`);
+});
+
+await check("BUG-1 只读源侧：cp -t /tmp/dir src/x（目标系统路径）放行", async () => {
+	const r = await rawAs("arch", "bash", { command: "cp -t /tmp/dir src/x" });
+	assert.notEqual(r?.block, true, `写目标为系统路径不应按源判定：${r?.reason}`);
+});
+
+console.log("\n[BUG-2 gate-version 严格解析]");
+
+async function withPolicy(text, fn) {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "trio-bug2-"));
+	try {
+		fs.mkdirSync(path.join(dir, ".omp", "trio"), { recursive: true });
+		fs.mkdirSync(path.join(dir, "src"), { recursive: true });
+		fs.writeFileSync(path.join(dir, ".omp", "trio", "policy.txt"), text);
+		let handler = null;
+		registerGuard({ on: (e, h) => (handler = h) });
+		const prev = process.env.TRIO_ROLE;
+		process.env.TRIO_ROLE = "dev";
+		try {
+			return await fn((tool, input) => handler({ toolName: tool, input }, { cwd: dir }));
+		} finally {
+			if (prev === undefined) delete process.env.TRIO_ROLE;
+			else process.env.TRIO_ROLE = prev;
+		}
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+}
+
+const basePolicy = POLICY.replace(/^# gate-version:.*$/gm, "").trimEnd() + "\n";
+const gateVariants = [
+	["=1.5 小数", `${basePolicy}# gate-version: 1.5\n`, /非法/u],
+	["=1abc 后缀", `${basePolicy}# gate-version: 1abc\n`, /非法/u],
+	["双行 1 后 2", `${basePolicy}# gate-version: 1\n# gate-version: 2\n`, /重复/u],
+	["双行 2 后 1", `${basePolicy}# gate-version: 2\n# gate-version: 1\n`, /重复/u],
+	["缺行", basePolicy, /缺失/u],
+];
+for (const [label, text, reason] of gateVariants) {
+	await check(`BUG-2 BLOCK：${label}`, async () => {
+		await withPolicy(text, async (write) => {
+			const r = await write("write", { path: "src/a.py", content: "x" });
+			assert.equal(r?.block, true, `${label} 应 fail-closed`);
+			assert.match(r.reason, reason);
+			assert.match(r.reason, /执法件版本漂移/u);
+		});
+	});
+}
+
+await check("BUG-2 合法唯一行 # gate-version: 1 → 放行", async () => {
+	await withPolicy(`${basePolicy}# gate-version: 1\n`, async (write) => {
+		const r = await write("write", { path: "src/a.py", content: "x" });
+		assert.notEqual(r?.block, true, `合法版本被误拦：${r?.reason}`);
+	});
+});
+
+console.log("\n[BUG-3 TRIO_ROLE 非法值 fail-closed]");
+
+for (const [label, role] of [
+	["devs 未知词", "devs"],
+	["前导空格 \" dev\"", " dev"],
+	["空串", ""],
+	["尾部空格 \"qa \"", "qa "],
+]) {
+	await check(`BUG-3 BLOCK：${label}`, async () => {
+		const r = await rawAs(role, "write", { path: "src/a.py", content: "x" });
+		assert.equal(r?.block, true, `非法角色 ${JSON.stringify(role)} 未被拦截`);
+		assert.match(r.reason, /TRIO_ROLE 非法/u);
+	});
+}
+
+await check("BUG-3 非法角色对 bash 写同样 BLOCK", async () => {
+	const r = await rawAs("devs", "bash", { command: "cp /tmp/f src/x" });
+	assert.equal(r?.block, true);
+	assert.match(r.reason, /TRIO_ROLE 非法/u);
+});
+
+await check("BUG-3 大写 DEV 归一化为 dev → 放行", async () => {
+	const r = await rawAs("DEV", "write", { path: "src/a.py", content: "x" });
+	assert.notEqual(r?.block, true, `DEV 应归一化为 dev：${r?.reason}`);
+});
+
+await check("BUG-3 pm 归一化为 arch → 按其规则判定（docs 契约放行）", async () => {
+	const r = await rawAs("pm", "write", { path: `${TASK}/arch-20261025-0900-spec.md`, content: "x" });
+	assert.notEqual(r?.block, true, `pm 别名未按 arch 放行：${r?.reason}`);
+});
+
+await check("BUG-3 未设置身份 → 逃生舱放行 + 醒目提示", async () => {
+	const r = await rawAs(undefined, "write", { path: "src/a.py", content: "x" });
+	assert.notEqual(r?.block, true, "未设置角色不应拦截");
+	assert.match(String(r?.additionalContext ?? ""), /无身份运行，门禁未生效/u);
+});
 
 fs.rmSync(PROJECT, { recursive: true, force: true });
 

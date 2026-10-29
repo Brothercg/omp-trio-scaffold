@@ -76,21 +76,43 @@ resolve_commit() {
 	git rev-parse -q --verify "${sha}^{commit}" 2>/dev/null || true
 }
 
-# AC-5：执法件版本自证 —— policy 声明的 gate-version 必须等于本件 EXPECTED。
+# BUG-2 / AC-5：严格解析 gate-version —— 必须恰好一行 ^# gate-version: <十进制整数>$。
+# 缺行 / 重复 / 任一行非法（1.5、1abc、CRLF、缩进等）一律 fail-closed；三面同判。
 check_gate_version() {
-	local root="$1" policy declared
-	policy="${root}/${POLICY_REL}"
+	local policy="$1" line digits count=0 value="" malformed="" saw=0
 	if [[ ! -f "$policy" ]]; then
-		log_error "TRIO 发布门禁：执法件版本漂移 —— policy 缺失（缺 # gate-version 声明）"
+		log_error "执法件版本漂移：gate-version 声明缺失（policy 不可读）"
 		return 1
 	fi
-	declared="$(sed -n 's/^# gate-version:[[:space:]]*\([0-9][0-9]*\).*$/\1/p' "$policy" | head -1)"
-	if [[ -z "$declared" ]]; then
-		log_error "TRIO 发布门禁：执法件版本漂移 —— # gate-version 声明缺失"
+	while IFS= read -r line || [[ -n "$line" ]]; do
+		if [[ "$line" != "# gate-version:"* ]]; then continue; fi
+		saw=1
+		if [[ "$line" =~ ^"# gate-version: "([0-9]+)$ ]]; then
+			digits="${BASH_REMATCH[1]}"
+			if (( ${#digits} > 15 )); then
+				malformed="$line"
+				continue
+			fi
+			count=$((count + 1))
+			value="$((10#$digits))"
+		else
+			malformed="$line"
+		fi
+	done <"$policy"
+	if [[ -n "$malformed" ]]; then
+		log_error "执法件版本漂移：gate-version 声明非法（${malformed}）"
 		return 1
 	fi
-	if [[ "$declared" != "$EXPECTED_GATE_VERSION" ]]; then
-		log_error "TRIO 发布门禁：执法件版本漂移 —— 声明 ${declared} ≠ 执法件内嵌 ${EXPECTED_GATE_VERSION}"
+	if [[ "$saw" -eq 0 || "$count" -eq 0 ]]; then
+		log_error "执法件版本漂移：gate-version 声明缺失"
+		return 1
+	fi
+	if [[ "$count" -gt 1 ]]; then
+		log_error "执法件版本漂移：gate-version 声明重复（必须恰好一行）"
+		return 1
+	fi
+	if [[ "$value" != "$EXPECTED_GATE_VERSION" ]]; then
+		log_error "执法件版本漂移：policy 声明 ${value} ≠ 执法件内嵌 ${EXPECTED_GATE_VERSION}"
 		return 1
 	fi
 	return 0
@@ -270,7 +292,7 @@ PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
 }
 cd "$PROJECT_ROOT" || exit 1
 
-check_gate_version "$PROJECT_ROOT" || exit 1
+check_gate_version "${PROJECT_ROOT}/${POLICY_REL}" || exit 1
 
 if [[ "$ROLE" == "arch" || "$ROLE" == "qa" ]]; then
 	log_error "TRIO 发布门禁：arch / qa 无发布权（禁止 push / tag）"

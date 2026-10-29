@@ -55,6 +55,22 @@ function normalizeRole(value: string | undefined): Role | null {
 	return ROLES.includes(lowered as Role) ? (lowered as Role) : null;
 }
 
+export type RoleEnvState =
+	| { state: "unset" }
+	| { state: "invalid"; raw: string }
+	| { state: "valid"; role: Role };
+
+/**
+ * BUG-3：区分「未设置」与「设置但非法」。
+ * 未设置 → 无身份逃生舱；空串/未知词/前后空白 → invalid（fail-closed）。
+ */
+export function resolveRoleEnv(value: string | undefined): RoleEnvState {
+	if (value === undefined) return { state: "unset" };
+	const role = normalizeRole(value);
+	if (role === null) return { state: "invalid", raw: value };
+	return { state: "valid", role };
+}
+
 interface Rule {
 	allow: boolean;
 	role: Role | "*";
@@ -69,8 +85,8 @@ export interface PolicySnapshot {
 	digest: string;
 	/** 快照来源；用于 describeVerdict 检测判定后文件是否已变化。 */
 	policyPath?: string;
-	/** policy.txt 的 # gate-version 声明；缺失为 undefined（AC-5 fail-closed）。 */
-	declaredVersion?: number;
+	/** policy.txt 的 # gate-version 声明解析结果（AC-5 fail-closed）。 */
+	gateVersion: GateVersionParseResult;
 	/** 项目根（由 policyPath 反推），供 judgeBash 做路径归一。 */
 	root?: string;
 }
@@ -125,7 +141,7 @@ export function loadPolicy(policyPath: string): PolicySnapshot | FailClosed {
 		mtimeMs,
 		digest,
 		policyPath,
-		declaredVersion: parseGateVersion(text),
+		gateVersion: parseGateVersion(text),
 		root: path.resolve(path.dirname(policyPath), "..", ".."),
 	};
 	policyCache.set(policyPath, snapshot);
@@ -153,18 +169,49 @@ export function describeVerdict(verdict: Verdict, snapshot: PolicySnapshot): str
 // 策略解析
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** 从注释行提取 # gate-version；缺失/非法返回 undefined（由调用方 fail-closed）。 */
-export function parseGateVersion(text: string): number | undefined {
-	const match = /^#\s*gate-version:\s*([0-9]+)/m.exec(text);
-	if (match === null) return undefined;
-	const value = Number(match[1]);
-	return Number.isSafeInteger(value) ? value : undefined;
+export interface GateVersionParseResult {
+	/** 恰好一行合法声明时的整型值。 */
+	version?: number;
+	/** missing=缺行；duplicate=多行；invalid=任一行不合法。 */
+	error?: "missing" | "duplicate" | "invalid";
+	/** 非法行的原文（诊断用）。 */
+	detail?: string;
 }
 
-/** AC-5：执法件自证版本。声明缺失或不符一律 fail-closed。 */
+/**
+ * BUG-2：严格解析 `^# gate-version: <十进制整数>$`。
+ * 必须恰好一行；缺行/重复/任一行非法（1.5、1abc、CRLF、缩进等）均 fail-closed。
+ */
+export function parseGateVersion(text: string): GateVersionParseResult {
+	const versions: number[] = [];
+	let sawPrefix = false;
+	let malformed: string | undefined;
+	for (const line of text.split("\n")) {
+		if (!line.startsWith("# gate-version:")) continue;
+		sawPrefix = true;
+		const match = /^# gate-version: ([0-9]+)$/.exec(line);
+		if (match === null) {
+			malformed = line;
+			continue;
+		}
+		const value = Number(match[1]);
+		if (!Number.isSafeInteger(value)) {
+			malformed = line;
+			continue;
+		}
+		versions.push(value);
+	}
+	if (malformed !== undefined) return { error: "invalid", detail: malformed };
+	if (!sawPrefix) return { error: "missing" };
+	if (versions.length === 0) return { error: "missing" };
+	if (versions.length > 1) return { error: "duplicate" };
+	return { version: versions[0] };
+}
+
+/** AC-5：执法件自证版本。声明缺失/重复/非法/不符一律 fail-closed。 */
 export function checkGateVersion(declared: number | undefined, expected: number): Verdict {
 	if (declared === undefined) {
-		return { allowed: false, reason: "执法件版本漂移：policy.txt 缺 # gate-version 声明" };
+		return { allowed: false, reason: "执法件版本漂移：gate-version 声明缺失" };
 	}
 	if (declared !== expected) {
 		return {
@@ -173,6 +220,23 @@ export function checkGateVersion(declared: number | undefined, expected: number)
 		};
 	}
 	return { allowed: true, reason: `执法件版本自证通过（gate-version ${declared}）` };
+}
+
+/** 把解析结果转成判定（guard 侧入口，pre-commit/pre-push 同语义）。 */
+export function judgeGateVersion(parsed: GateVersionParseResult, expected: number): Verdict {
+	if (parsed.error === "missing") {
+		return { allowed: false, reason: "执法件版本漂移：gate-version 声明缺失" };
+	}
+	if (parsed.error === "duplicate") {
+		return { allowed: false, reason: "执法件版本漂移：gate-version 声明重复（必须恰好一行）" };
+	}
+	if (parsed.error === "invalid") {
+		return {
+			allowed: false,
+			reason: `执法件版本漂移：gate-version 声明非法（${parsed.detail ?? ""}）`,
+		};
+	}
+	return checkGateVersion(parsed.version, expected);
 }
 
 export function parsePolicy(text: string): Rule[] {
@@ -638,6 +702,139 @@ function positionalArgs(args: readonly string[], optionValues: ReadonlySet<strin
 	return out;
 }
 
+/**
+ * BUG-1：cp/mv/install/ln/rsync 的写目标语义。
+ * 返回 positionals（源/普通位置参数）与 targetDirs（-t / --target-directory 指定的目录）。
+ * 带值选项的值不得计为位置参数；`--` 之后一律按位置参数。
+ */
+const WRITER_VALUE_OPTIONS: Readonly<Record<string, ReadonlySet<string>>> = {
+	cp: new Set([
+		"-t",
+		"--target-directory",
+		"-S",
+		"--suffix",
+		"--preserve",
+		"--sparse",
+		"--reflink",
+		"--context",
+	]),
+	mv: new Set(["-t", "--target-directory", "-S", "--suffix"]),
+	install: new Set([
+		"-t",
+		"--target-directory",
+		"-m",
+		"--mode",
+		"-o",
+		"--owner",
+		"-g",
+		"--group",
+		"-S",
+		"--suffix",
+		"--context",
+		"--strip-program",
+	]),
+	ln: new Set(["-t", "--target-directory", "-S", "--suffix"]),
+	rsync: new Set([
+		"-e",
+		"--rsh",
+		"--rsync-path",
+		"--exclude",
+		"--include",
+		"--filter",
+		"--exclude-from",
+		"--include-from",
+		"--files-from",
+		"--port",
+		"--password-file",
+		"--timeout",
+		"--contimeout",
+		"--bwlimit",
+		"--chmod",
+		"--chown",
+		"--usermap",
+		"--groupmap",
+		"--out-format",
+		"--log-file",
+		"--log-format",
+		"--link-dest",
+		"--copy-dest",
+		"--compare-dest",
+		"--partial-dir",
+		"--temp-dir",
+		"--backup-dir",
+		"--suffix",
+		"-T",
+		"--max-size",
+		"--min-size",
+		"--address",
+		"--sockopts",
+		"--block-size",
+		"--compress-level",
+		"--protocol",
+		"--iconv",
+		"--checksum-seed",
+		"--write-batch",
+		"--read-batch",
+		"--only-write-batch",
+		"--stop-after",
+		"--stop-at",
+		"-M",
+		"--remote-option",
+		"--skip-compress",
+		"--modify-window",
+		"--max-alloc",
+		"--time-limit",
+	]),
+};
+
+function parseWriterArgs(
+	command: string,
+	args: readonly string[],
+): { positionals: string[]; targetDirs: string[] } {
+	const valueOptions = WRITER_VALUE_OPTIONS[command] ?? new Set<string>();
+	const positionals: string[] = [];
+	const targetDirs: string[] = [];
+	let afterDoubleDash = false;
+	for (let index = 0; index < args.length; index++) {
+		const arg = args[index];
+		if (afterDoubleDash) {
+			positionals.push(arg);
+			continue;
+		}
+		if (arg === "--") {
+			afterDoubleDash = true;
+			continue;
+		}
+		if (arg === "--target-directory" || arg === "-t") {
+			const value = args[index + 1];
+			if (value !== undefined) {
+				targetDirs.push(value);
+				index += 1;
+			}
+			continue;
+		}
+		if (arg.startsWith("--target-directory=")) {
+			targetDirs.push(arg.slice("--target-directory=".length));
+			continue;
+		}
+		// 组合短选项以 t 结尾（如 -rt）：下一个 token 是目录。
+		if (/^-[A-Za-z]+$/.test(arg) && arg.endsWith("t")) {
+			const value = args[index + 1];
+			if (value !== undefined) {
+				targetDirs.push(value);
+				index += 1;
+			}
+			continue;
+		}
+		if (arg.startsWith("-") && arg !== "-") {
+			if (valueOptions.has(arg)) index += 1; // 跳过选项值，不计位置参数
+			continue;
+		}
+		positionals.push(arg);
+	}
+	return { positionals, targetDirs };
+}
+
 /** 从 python -c / node -e 的代码中只取真实写入调用，忽略内容字符串。 */
 function writeTargetsInCode(code: string): string[] {
 	return extractPathsFromCode(code);
@@ -692,9 +889,10 @@ function segmentTargets(words: readonly string[], redirectTargets: readonly stri
 	}
 
 	if (DEST_ONLY_WRITERS.has(command)) {
-		// cp / rsync / install / ln：源是读，只有最后一个位置参数是写目标。
-		const positional = positionalArgs(args);
-		if (positional.length > 0) targets.push(positional[positional.length - 1]);
+		// cp / mv / rsync / install / ln：-t/--target-directory 指定目录；否则末位置参数是目标。
+		const { positionals, targetDirs } = parseWriterArgs(command, args);
+		if (targetDirs.length > 0) targets.push(...targetDirs);
+		else if (positionals.length > 0) targets.push(positionals[positionals.length - 1]);
 		return targets;
 	}
 
@@ -909,14 +1107,14 @@ export default function (pi: HookAPI) {
 
 	pi.on("tool_call", async (event, ctx) => {
 		// TRIO_ROLE=pm 是 arch 的兼容别名，归一化后统一按 arch 判定。
-		const role = normalizeRole(process.env.TRIO_ROLE);
+		const roleState = resolveRoleEnv(process.env.TRIO_ROLE);
 		const root = projectRoot(ctx);
 		const input = (event.input ?? {}) as Record<string, unknown>;
 		const toolName = event.toolName;
 		const command = typeof input.command === "string" ? input.command : "";
 
-		// AC-6：无身份不再静默 —— 放行但每次写判定都附醒目提示。
-		if (role === null) {
+		// AC-6：未设置身份不再静默 —— 放行但每次写判定都附醒目提示。
+		if (roleState.state === "unset") {
 			if (!isControlledWrite(toolName, input)) return undefined;
 			const warning = "⚠ 无身份运行，门禁未生效（TRIO_ROLE 未设置）：本次写操作已放行。";
 			try {
@@ -926,6 +1124,19 @@ export default function (pi: HookAPI) {
 			}
 			return { additionalContext: warning };
 		}
+
+		// BUG-3：设置了但值非法 → fail-closed（与 pre-commit 同判）。
+		if (roleState.state === "invalid") {
+			if (!isControlledWrite(toolName, input)) return undefined;
+			const raw = roleState.raw.length === 0 ? "(空串)" : roleState.raw;
+			return {
+				block: true,
+				reason:
+					`TRIO 门禁：TRIO_ROLE 非法：${raw}（合法值 arch/dev/qa/pm，大小写不敏感）。\n` +
+					`已 fail-closed 拒绝本次写操作。`,
+			};
+		}
+		const role = roleState.role;
 
 		const policyPath = path.join(root, POLICY_RELATIVE_PATH);
 		// 每次判定加载共享快照：mtimeMs + digest 任一变化即重读。
@@ -949,7 +1160,7 @@ export default function (pi: HookAPI) {
 		}
 
 		// AC-5：执法件版本自证；声明缺失/不符一律 fail-closed（三面同判）。
-		const gate = checkGateVersion(loaded.declaredVersion, EXPECTED_GATE_VERSION);
+		const gate = judgeGateVersion(loaded.gateVersion, EXPECTED_GATE_VERSION);
 		if (!gate.allowed) {
 			if (!isControlledWrite(toolName, input)) return undefined;
 			return {
