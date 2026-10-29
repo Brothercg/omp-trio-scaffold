@@ -109,7 +109,8 @@ REPORT_BAD="${TASK_DIR}/qa-20261025-1520-report-selftest-bad.md"
 bold "[1/8] 安装完整性"
 
 missing=0
-for pair in "hook:${HOOK}" "策略:${POLICY}" "报告校验器:${VALIDATOR}" "会话名扩展:${EXTENSION}"; do
+for pair in "hook:${HOOK}" "策略:${POLICY}" "报告校验器:${VALIDATOR}" "会话名扩展:${EXTENSION}" \
+	"post-commit 审计:${PROJECT_DIR}/.git/hooks/post-commit" "pre-push 发布门禁:${PROJECT_DIR}/.git/hooks/pre-push"; do
 	name="${pair%%:*}"
 	path="${pair#*:}"
 	if [[ -f "$path" ]]; then
@@ -126,6 +127,15 @@ if [[ -x "$PRECOMMIT" ]]; then
 	PASS=$((PASS + 1))
 else
 	red "  ✗ pre-commit 缺失或不可执行：$PRECOMMIT"
+	FAIL=$((FAIL + 1))
+	missing=1
+fi
+# TASK-007 AC-5：gate-version 声明与执法件内嵌 EXPECTED 必须对齐。
+if grep -q '^# gate-version: 1' "$POLICY" && grep -q 'EXPECTED_GATE_VERSION = 1' "$HOOK"; then
+	green "  ✓ gate-version 自证：policy 声明 1 == 执法件 EXPECTED 1"
+	PASS=$((PASS + 1))
+else
+	red "  ✗ gate-version 漂移：policy 缺 '# gate-version: 1' 或 guard 缺 EXPECTED_GATE_VERSION=1"
 	FAIL=$((FAIL + 1))
 	missing=1
 fi
@@ -299,7 +309,7 @@ After all four, report EXACTLY one line per step in the form "STEP n: SUCCEEDED"
 	# 模型不可用（订阅/限流/额度）不是门禁缺陷 —— 单独跳过，不计失败。
 	# 门禁本身的等价证明在 [3/8] 的 hook 运行时测试（不依赖模型）。
 	ENV_ERR="$(printf '%s' "$OMP_OUT" |
-		grep -oiE 'MODEL_NOT_IN_PLAN|GoUsageLimitError|usage limit exceeded|permission_error|rate_limit' |
+		grep -oiE 'MODEL_NOT_IN_PLAN|GoUsageLimitError|usage limit exceeded|permission_error|rate_limit|authentication_error|Invalid 'Authorization'' |
 		head -1 || true)"
 	if [[ -n "$ENV_ERR" ]]; then
 		bold "[6/8] omp 冒烟：跳过（omp 环境不可用：${ENV_ERR}）"

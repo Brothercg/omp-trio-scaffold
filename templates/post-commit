@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+#
+# TRIO 提交审计 —— git post-commit（TASK-007 §4.2 / ADR-0012 §3.1）
+#
+# pre-commit 放行时写 marker .git/trio-last-gate-ok；本 hook 在提交落地后核
+# marker：
+#   - 有 marker → 追加 "<ISO> <sha> ok"，并删除 marker；
+#   - 无 marker（git commit --no-verify 跳过 pre-commit）→ 追加
+#     "<ISO> <sha> bypass(no-marker)"。
+#
+# post-commit 不随 --no-verify 抑制（git 原生行为），因此绕过可检出。
+# 审计只追加、不改写；任何异常都放行提交（审计失败不得阻断用户）。
+#
+# 用法：作为 .git/hooks/post-commit 安装（由 bin/init-agent.sh 完成）。
+
+set -uo pipefail
+
+readonly SELF="$(basename "$0")"
+readonly MARKER_REL="trio-last-gate-ok"
+readonly AUDIT_REL="trio-audit.log"
+
+GIT_DIR_PATH="$(git rev-parse --git-dir 2>/dev/null)" || exit 0
+SHA="$(git rev-parse --verify HEAD 2>/dev/null)" || exit 0
+[[ -n "$SHA" ]] || exit 0
+
+MARKER="${GIT_DIR_PATH}/${MARKER_REL}"
+AUDIT="${GIT_DIR_PATH}/${AUDIT_REL}"
+STAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+if [[ -f "$MARKER" ]]; then
+	printf '%s %s ok\n' "$STAMP" "$SHA" >>"$AUDIT" 2>/dev/null || true
+	rm -f "$MARKER" 2>/dev/null || true
+else
+	printf '%s %s bypass(no-marker)\n' "$STAMP" "$SHA" >>"$AUDIT" 2>/dev/null || true
+fi
+
+exit 0

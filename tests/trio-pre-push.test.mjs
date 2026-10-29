@@ -63,6 +63,9 @@ function makeFakeRepo() {
 	// 校验器随仓库走：dev 分支的放行前置 a 需要真实跑报告校验
 	fs.mkdirSync(path.join(dir, "bin"), { recursive: true });
 	fs.copyFileSync(VALIDATOR, path.join(dir, "bin", "trio-check-report.mjs"));
+	// TASK-007 AC-5：执法件版本自证依赖 policy 的 gate-version 声明。
+	fs.mkdirSync(path.join(dir, ".omp", "trio"), { recursive: true });
+	fs.writeFileSync(path.join(dir, ".omp", "trio", "policy.txt"), "# gate-version: 1\n");
 	return dir;
 }
 
@@ -247,19 +250,33 @@ function setBoard(repo, content) {
 
 console.log("\n[AC-4 证据绑定：qa_report 归属 + merge-base 祖先]");
 
-check("AC-4a 报告基线 B 是待推 L 的祖先 → 放行", () => {
+check("AC-4a 报告基线 B == 待推 L → 放行", () => {
+	const repo = makeLineageRepo();
+	execFileSync("git", ["commit", "-q", "--allow-empty", "-m", "work"], { cwd: repo });
+	const localSha = revParse(repo, "HEAD");
+	setBoard(repo, boardWith("qa_passed", { qa_report: "docs/task/x/qa-20261026-0430-report-t.md" }));
+	setReport(repo, reportFor(repo, localSha));
+	const { code, stdout } = runHookWithRefs(repo, "dev", localSha);
+	assert.equal(code, 0);
+	assert.match(stdout, /基线 == 待推/u);
+});
+
+check("AC-4a2 B != L 但 B..L delta 仅文档路径 → 免复测放行", () => {
 	const repo = makeLineageRepo();
 	const b = revParse(repo, "HEAD");
-	execFileSync("git", ["commit", "-q", "--allow-empty", "-m", "work"], { cwd: repo });
+	fs.mkdirSync(path.join(repo, "docs", "task", "x"), { recursive: true });
+	fs.writeFileSync(path.join(repo, "docs", "task", "x", "note.md"), "doc\n");
+	execFileSync("git", ["add", "docs/task/x/note.md"], { cwd: repo });
+	execFileSync("git", ["commit", "-q", "-m", "docs only"], { cwd: repo });
 	const localSha = revParse(repo, "HEAD");
 	setBoard(repo, boardWith("qa_passed", { qa_report: "docs/task/x/qa-20261026-0430-report-t.md" }));
 	setReport(repo, reportFor(repo, b));
 	const { code, stdout } = runHookWithRefs(repo, "dev", localSha);
 	assert.equal(code, 0);
-	assert.match(stdout, /放行/u);
+	assert.match(stdout, /免复测放行/u);
 });
 
-check("AC-4b 基线 B 非待推 L 的祖先（兄弟提交）→ 拒绝且 stderr 含 merge-base 与两 hash", () => {
+check("AC-4b 基线 B != 待推 L 且 delta 含代码路径 → 拒绝且明示两 hash", () => {
 	const repo = makeLineageRepo();
 	const b = revParse(repo, "HEAD");
 	// 在 orphan 分支上造一个与 B 无关的待推提交（必然非后代）
@@ -270,7 +287,8 @@ check("AC-4b 基线 B 非待推 L 的祖先（兄弟提交）→ 拒绝且 stder
 	setReport(repo, reportFor(repo, b));
 	const { code, stderr } = runHookWithRefs(repo, "dev", localSha);
 	assert.equal(code, 1);
-	assert.match(stderr, /merge-base/u);
+	assert.match(stderr, /基线 .*≠ 待推/u);
+	assert.match(stderr, /代码路径|需 QA 重跑|无法计算 delta/u);
 	assert.ok(stderr.includes(b), `stderr 应含基线 hash ${b}`);
 	assert.ok(stderr.includes(localSha), `stderr 应含待推 hash ${localSha}`);
 });
@@ -359,13 +377,12 @@ check("AC-4h 看板状态 testing（未达 qa_passed）→ 拒绝", () => {
 	assert.match(stderr, /testing|qa_passed/u);
 });
 
-check("AC-4i 祖先链有效 + 看板 user_signed → 放行", () => {
+check("AC-4i 基线 == 待推 + 看板 user_signed → 放行", () => {
 	const repo = makeLineageRepo();
-	const b = revParse(repo, "HEAD");
 	execFileSync("git", ["commit", "-q", "--allow-empty", "-m", "work"], { cwd: repo });
 	const localSha = revParse(repo, "HEAD");
 	setBoard(repo, boardWith("user_signed", { qa_report: "docs/task/x/qa-20261026-0430-report-t.md" }));
-	setReport(repo, reportFor(repo, b));
+	setReport(repo, reportFor(repo, localSha));
 	const { code } = runHookWithRefs(repo, "dev", localSha);
 	assert.equal(code, 0);
 });
@@ -423,6 +440,44 @@ check("AC-6c exempt 有 reason 但决策记录无裁决引用 → 拒绝", () =>
 	const { code, stderr } = runHookWithRefs(repo, "dev");
 	assert.equal(code, 1);
 	assert.match(stderr, /决策记录/u);
+});
+
+console.log("\n[TASK-007 AC-5 执法件版本自证 / AC-7 绕过审计输出]");
+
+check("AC-5 policy 声明 gate-version: 2 ≠ EXPECTED=1 → 拒绝并明示版本漂移", () => {
+	const repo = makeFakeRepo();
+	fs.writeFileSync(path.join(repo, ".omp", "trio", "policy.txt"), "# gate-version: 2\n");
+	const { code, stderr } = runHook(repo, "dev");
+	assert.equal(code, 1);
+	assert.match(stderr, /执法件版本漂移/u);
+});
+
+check("AC-5 gate-version 缺失 → 拒绝并明示漂移", () => {
+	const repo = makeFakeRepo();
+	fs.writeFileSync(path.join(repo, ".omp", "trio", "policy.txt"), "allow dev src/**\n");
+	const { code, stderr } = runHook(repo, "dev");
+	assert.equal(code, 1);
+	assert.match(stderr, /gate-version 声明缺失|执法件版本漂移/u);
+});
+
+check("AC-7 放行前输出 .git/trio-audit.log 的 bypass 行", () => {
+	const repo = makeFakeRepo();
+	setBoard(repo, BOARD_EXEMPT("bootstrap-fix", "| `05:00` | 写通道 | 成立 | `V-1` |"));
+	fs.writeFileSync(
+		path.join(repo, ".git", "trio-audit.log"),
+		"2026-10-29T03:00:00Z deadbeef bypass(no-marker)\n",
+	);
+	const { code, stdout } = runHookWithRefs(repo, "dev");
+	assert.equal(code, 0);
+	assert.match(stdout, /审计 bypass：.*deadbeef bypass\(no-marker\)/u);
+});
+
+check("AC-7 audit.log 不存在 → 视为无 bypass，不报错", () => {
+	const repo = makeFakeRepo();
+	setBoard(repo, BOARD_EXEMPT("bootstrap-fix", "| `05:00` | 写通道 | 成立 | `V-1` |"));
+	const { code, stdout } = runHookWithRefs(repo, "dev");
+	assert.equal(code, 0);
+	assert.match(stdout, /审计：无 bypass 记录/u);
 });
 
 // ── 汇总 ───────────────────────────────────────────────────────────────────

@@ -22,9 +22,13 @@ import type { HookAPI } from "@oh-my-pi/pi-coding-agent/extensibility/hooks";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 
 type Role = "arch" | "dev" | "qa";
-type Verdict = { allowed: boolean; rule?: Rule; reason: string };
+export type Verdict = { allowed: boolean; rule?: Rule; reason: string };
+
+/** 执法件内嵌版本；与 policy.txt 的 # gate-version 声明对齐（AC-5）。 */
+export const EXPECTED_GATE_VERSION = 1;
 
 const ROLES: readonly Role[] = ["arch", "dev", "qa"];
 
@@ -65,6 +69,10 @@ export interface PolicySnapshot {
 	digest: string;
 	/** 快照来源；用于 describeVerdict 检测判定后文件是否已变化。 */
 	policyPath?: string;
+	/** policy.txt 的 # gate-version 声明；缺失为 undefined（AC-5 fail-closed）。 */
+	declaredVersion?: number;
+	/** 项目根（由 policyPath 反推），供 judgeBash 做路径归一。 */
+	root?: string;
 }
 
 export interface FailClosed {
@@ -112,7 +120,14 @@ export function loadPolicy(policyPath: string): PolicySnapshot | FailClosed {
 	} catch {
 		return { failClosed: true, reason: "policy 不可解析" };
 	}
-	const snapshot: PolicySnapshot = { rules, mtimeMs, digest, policyPath };
+	const snapshot: PolicySnapshot = {
+		rules,
+		mtimeMs,
+		digest,
+		policyPath,
+		declaredVersion: parseGateVersion(text),
+		root: path.resolve(path.dirname(policyPath), "..", ".."),
+	};
 	policyCache.set(policyPath, snapshot);
 	return snapshot;
 }
@@ -137,6 +152,28 @@ export function describeVerdict(verdict: Verdict, snapshot: PolicySnapshot): str
 // ─────────────────────────────────────────────────────────────────────────────
 // 策略解析
 // ─────────────────────────────────────────────────────────────────────────────
+
+/** 从注释行提取 # gate-version；缺失/非法返回 undefined（由调用方 fail-closed）。 */
+export function parseGateVersion(text: string): number | undefined {
+	const match = /^#\s*gate-version:\s*([0-9]+)/m.exec(text);
+	if (match === null) return undefined;
+	const value = Number(match[1]);
+	return Number.isSafeInteger(value) ? value : undefined;
+}
+
+/** AC-5：执法件自证版本。声明缺失或不符一律 fail-closed。 */
+export function checkGateVersion(declared: number | undefined, expected: number): Verdict {
+	if (declared === undefined) {
+		return { allowed: false, reason: "执法件版本漂移：policy.txt 缺 # gate-version 声明" };
+	}
+	if (declared !== expected) {
+		return {
+			allowed: false,
+			reason: `执法件版本漂移：policy 声明 ${declared} ≠ 执法件内嵌 EXPECTED ${expected}`,
+		};
+	}
+	return { allowed: true, reason: `执法件版本自证通过（gate-version ${declared}）` };
+}
 
 export function parsePolicy(text: string): Rule[] {
 	const rules: Rule[] = [];
@@ -222,21 +259,161 @@ export function decide(
 // 路径归一化
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** 把任意目标路径转成相对项目根的 POSIX 路径；不在项目根内则返回 null（不管辖）。 */
-function toRelativePath(target: string, projectRoot: string): string | null {
-	if (target.length === 0) return null;
-	// 非文件系统目标：xd:// 设备、local:// 草稿、URL —— 不属于三方契约目录。
-	if (/^[a-z][a-z0-9+.-]*:\/\//i.test(target)) return null;
-	let absolute: string;
-	if (path.isAbsolute(target)) {
-		absolute = path.resolve(target);
-	} else {
-		absolute = path.resolve(projectRoot, target);
+export interface NormalizedFsTarget {
+	/** 相对项目根（realpath 归一后）的 POSIX 路径；逃逸/不管辖时缺省。 */
+	relPath?: string;
+	/** 出根判定：其他 worktree 根内 → 拒绝；系统路径 → 不管辖。 */
+	escape?: "worktree" | "system";
+	/** 真实路径与词法路径不一致（symlink 被解析），AC-2 需明示。 */
+	symlink?: boolean;
+	/** 词法归一后的相对路径（仅用于文案溯源）。 */
+	lexicalRel?: string;
+	/** symlink 环等不可解析错误；按 fail-closed 拒绝。 */
+	error?: "symlink-loop";
+}
+
+function realRootOf(root: string): string {
+	try {
+		return fs.realpathSync(root);
+	} catch {
+		return path.resolve(root);
 	}
-	const relative = path.relative(projectRoot, absolute);
-	if (relative.length === 0) return null;
-	if (relative.startsWith("..") || path.isAbsolute(relative)) return null;
-	return relative.split(path.sep).join("/");
+}
+
+/** 解析最深的已存在祖先，再拼回尚未创建的后缀；环返回错误。 */
+function realpathDeepest(absolute: string): { resolved: string } | { error: "symlink-loop" } {
+	let current = path.resolve(absolute);
+	const tail: string[] = [];
+	for (let depth = 0; depth < 64; depth++) {
+		try {
+			const real = fs.realpathSync(current);
+			return { resolved: tail.length > 0 ? path.join(real, ...tail.slice().reverse()) : real };
+		} catch (error) {
+			const code = (error as NodeJS.ErrnoException).code;
+			if (code === "ELOOP") return { error: "symlink-loop" };
+			if (code !== "ENOENT" && code !== "ENOTDIR") return { error: "symlink-loop" };
+			const parent = path.dirname(current);
+			if (parent === current) return { resolved: path.resolve(absolute) };
+			tail.push(path.basename(current));
+			current = parent;
+		}
+	}
+	return { error: "symlink-loop" };
+}
+
+const worktreeRootCache = new Map<string, string[]>();
+
+/** 其他 worktree 根（realpath）；git 不可用时为空。 */
+function otherWorktreeRoots(root: string, realRoot: string): string[] {
+	const cached = worktreeRootCache.get(realRoot);
+	if (cached !== undefined) return cached;
+	const roots: string[] = [];
+	try {
+		const out = execFileSync("git", ["-C", root, "worktree", "list", "--porcelain"], {
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "ignore"],
+			timeout: 2000,
+		});
+		for (const line of out.split("\n")) {
+			if (!line.startsWith("worktree ")) continue;
+			const candidate = line.slice("worktree ".length).trim();
+			if (candidate.length === 0) continue;
+			let real = candidate;
+			try {
+				real = fs.realpathSync(candidate);
+			} catch {
+				real = path.resolve(candidate);
+			}
+			if (real !== realRoot) roots.push(real);
+		}
+	} catch {
+		// git 不可用/超时：无其他 worktree 信息，按系统路径处理。
+	}
+	worktreeRootCache.set(realRoot, roots);
+	return roots;
+}
+
+function isInside(parent: string, child: string): boolean {
+	const relative = path.relative(parent, child);
+	return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+/**
+ * ADR-0012 §3.2/§3.4：写目标 realpath 归一后判定。
+ *   - 落在本项目根内 → relPath（symlink 穿透由 realpath 解析后按真实路径判）；
+ *   - 落在其他 worktree 根内 → escape="worktree"（拒绝）；
+ *   - 其余根外路径 → escape="system"（不管辖，维持现状）。
+ */
+export function normalizeFsTarget(raw: string, root: string): NormalizedFsTarget {
+	if (raw.length === 0) return { escape: "system" };
+	// 非文件系统目标：xd:// 设备、local:// 草稿、URL —— 不属于三方契约目录。
+	if (/^[a-z][a-z0-9+.-]*:\/\//i.test(raw)) return { escape: "system" };
+
+	const realRoot = realRootOf(root);
+	const lexical = path.isAbsolute(raw) ? path.resolve(raw) : path.resolve(realRoot, raw);
+	const real = realpathDeepest(lexical);
+	if ("error" in real) return { error: real.error };
+	const resolved = real.resolved;
+	const lexicalRelRaw = path.isAbsolute(raw)
+		? path.relative(realRoot, lexical)
+		: path.relative(realRoot, path.resolve(realRoot, raw));
+	const lexicalRel = lexicalRelRaw.split(path.sep).join("/");
+
+	if (isInside(realRoot, resolved)) {
+		const relPath = path.relative(realRoot, resolved).split(path.sep).join("/");
+		return { relPath, lexicalRel, symlink: relPath !== lexicalRel };
+	}
+	for (const otherRoot of otherWorktreeRoots(root, realRoot)) {
+		if (isInside(otherRoot, resolved)) return { escape: "worktree", lexicalRel };
+	}
+	return { escape: "system", lexicalRel };
+}
+
+/**
+ * ADR-0012 §3.2：bash 写目标走与 write/edit 同语义的 allow+deny 全矩阵判定。
+ * 未检出写目标（只读命令）放行；每个目标独立归一后判定，任一拒绝即拒绝。
+ */
+export function judgeBash(command: string, role: Role, snapshot: PolicySnapshot): Verdict {
+	const root = snapshot.root ?? process.cwd();
+	const targets = bashTargets(command);
+	if (targets.length === 0) {
+		return { allowed: true, reason: "未检出写目标（只读命令）" };
+	}
+	const denials: Verdict[] = [];
+	for (const target of targets) {
+		const normalized = normalizeFsTarget(target, root);
+		if (normalized.error === "symlink-loop") {
+			denials.push({
+				allowed: false,
+				reason: `写目标 "${target}" 的 symlink 无法解析（环/非目录），按 fail-closed 拒绝`,
+			});
+			continue;
+		}
+		if (normalized.escape === "worktree") {
+			denials.push({
+				allowed: false,
+				reason: `写目标 "${target}" 位于其他 worktree 根内：跨 worktree 写入不支持`,
+			});
+			continue;
+		}
+		if (normalized.escape === "system") continue;
+		const relPath = normalized.relPath ?? "";
+		if (relPath.length === 0) continue;
+		const verdict = decide(snapshot, role, relPath);
+		if (verdict.allowed) continue;
+		const prefix = normalized.symlink
+			? `写目标 "${target}" 经 symlink 穿透到 "${relPath}"（symlink 穿透）`
+			: `写目标 "${target}"`;
+		denials.push({ ...verdict, reason: `${prefix}：${verdict.reason}` });
+	}
+	if (denials.length === 0) {
+		return { allowed: true, reason: `写目标 ${targets.join(", ")} 均在白名单内` };
+	}
+	return {
+		allowed: false,
+		rule: denials[0].rule,
+		reason: denials.map((denial) => denial.reason).join("\n"),
+	};
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -733,18 +910,29 @@ export default function (pi: HookAPI) {
 	pi.on("tool_call", async (event, ctx) => {
 		// TRIO_ROLE=pm 是 arch 的兼容别名，归一化后统一按 arch 判定。
 		const role = normalizeRole(process.env.TRIO_ROLE);
-		if (role === null) return undefined;
-
 		const root = projectRoot(ctx);
 		const input = (event.input ?? {}) as Record<string, unknown>;
 		const toolName = event.toolName;
+		const command = typeof input.command === "string" ? input.command : "";
+
+		// AC-6：无身份不再静默 —— 放行但每次写判定都附醒目提示。
+		if (role === null) {
+			if (!isControlledWrite(toolName, input)) return undefined;
+			const warning = "⚠ 无身份运行，门禁未生效（TRIO_ROLE 未设置）：本次写操作已放行。";
+			try {
+				ctx.ui?.notify("无身份运行，门禁未生效", "warning");
+			} catch {
+				// 无 UI 的 print 模式不阻断判定。
+			}
+			return { additionalContext: warning };
+		}
+
 		const policyPath = path.join(root, POLICY_RELATIVE_PATH);
 		// 每次判定加载共享快照：mtimeMs + digest 任一变化即重读。
 		const loaded = loadPolicy(policyPath);
 
 		if ("failClosed" in loaded) {
 			if (!isControlledWrite(toolName, input)) return undefined;
-			const command = typeof input.command === "string" ? input.command : "";
 			const targets = inputPaths(toolName, input);
 			const detail =
 				toolName === "bash"
@@ -760,8 +948,20 @@ export default function (pi: HookAPI) {
 			};
 		}
 
+		// AC-5：执法件版本自证；声明缺失/不符一律 fail-closed（三面同判）。
+		const gate = checkGateVersion(loaded.declaredVersion, EXPECTED_GATE_VERSION);
+		if (!gate.allowed) {
+			if (!isControlledWrite(toolName, input)) return undefined;
+			return {
+				block: true,
+				reason:
+					`TRIO 门禁：${ROLE_LABEL[role]} 的写入已被拦截。\n` +
+					`${describeVerdict(gate, loaded)}\n` +
+					`策略来源：${POLICY_RELATIVE_PATH}`,
+			};
+		}
+
 		const rules = loaded.rules;
-		const command = typeof input.command === "string" ? input.command : "";
 
 		if (rules.length === 0) {
 			if (!isControlledWrite(toolName, input)) return undefined;
@@ -781,22 +981,15 @@ export default function (pi: HookAPI) {
 			};
 		}
 
-		// bash 走单独的判定：写意图 AND 禁写路径 同时命中才拦。
+		// AC-1：bash 写目标走 allow+deny 全矩阵（与 write/edit 同语义）。
 		if (toolName === "bash") {
 			if (command.length === 0) return undefined;
-			const forbidden = rules
-				.filter(rule => !rule.allow && (rule.role === "*" || rule.role === role))
-				.map(rule => rule.glob);
-			const hits = bashTargetsForbidden(command, forbidden);
-			if (hits.length === 0) return undefined;
-			const verdict: Verdict = {
-				allowed: false,
-				reason: `命令写目标 ${hits.join(", ")} 命中禁止规则`,
-			};
+			const verdict = judgeBash(command, role, loaded);
+			if (verdict.allowed) return undefined;
 			return {
 				block: true,
 				reason:
-					`TRIO 门禁：${ROLE_LABEL[role]} 不得写入 ${hits.join(", ")}。\n` +
+					`TRIO 门禁：${ROLE_LABEL[role]} 不得写入该目标。\n` +
 					`命令：${command}\n` +
 					`${describeVerdict(verdict, loaded)}\n` +
 					`若这是误判（例如只是读取该目录），请改用不触达写意图的形式。\n` +
@@ -809,10 +1002,25 @@ export default function (pi: HookAPI) {
 
 		const violations: string[] = [];
 		for (const target of targets) {
-			const relative = toRelativePath(target, root);
-			if (relative === null) continue;
+			// AC-2/AC-3：realpath 归一后判定；symlink 穿透按真实路径判。
+			const normalized = normalizeFsTarget(target, root);
+			if (normalized.error === "symlink-loop") {
+				violations.push(`目标 "${target}" 的 symlink 无法解析（环/非目录），按 fail-closed 拒绝\n快照：${loaded.digest.slice(0, 8)}（mtimeMs ${loaded.mtimeMs}）`);
+				continue;
+			}
+			if (normalized.escape === "worktree") {
+				violations.push(`目标 "${target}" 位于其他 worktree 根内：跨 worktree 写入不支持`);
+				continue;
+			}
+			if (normalized.escape === "system") continue;
+			const relative = normalized.relPath ?? "";
+			if (relative.length === 0) continue;
 			const verdict = decide(loaded, role, relative);
-			if (!verdict.allowed) violations.push(describeVerdict(verdict, loaded));
+			if (verdict.allowed) continue;
+			const prefix = normalized.symlink
+				? `目标 "${target}" 经 symlink 穿透到 "${relative}"（symlink 穿透）`
+				: "";
+			violations.push(prefix.length > 0 ? `${prefix}\n${describeVerdict(verdict, loaded)}` : describeVerdict(verdict, loaded));
 		}
 		if (violations.length === 0) return undefined;
 

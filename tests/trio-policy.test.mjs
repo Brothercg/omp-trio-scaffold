@@ -85,6 +85,19 @@ function assertDenied(role, filePath) {
 /** policy 全文（回收后） */
 const POLICY_TEXT = fs.readFileSync(POLICY_PATH, "utf8");
 
+// TASK-007 临时写通道（ADR-0003）：窗口内 arch 对下列精确文件放行；
+// 回收后（BEGIN TASK-007 删除）回到 deny * fail-closed。测试两态兼容。
+const WINDOW_ACTIVE = POLICY_TEXT.includes("BEGIN TASK-007");
+const WINDOW_ARCH_ALLOW = new Set([
+	".omp/hooks/pre/trio-guard.ts",
+	"templates/pre-push",
+	"templates/post-commit",
+	"bin/trio-check-report.mjs",
+	"bin/trio-mutation-check.mjs",
+	"bin/trio-selftest.sh",
+	"bin/init-agent.sh",
+]);
+
 // ── 1. 角色隔离矩阵 ────────────────────────────────────────────────────────
 
 console.log("\n[角色隔离矩阵]");
@@ -175,8 +188,9 @@ for (const file of [
 	"templates/pre-commit",
 	"docs/REPLY-CONVENTIONS.md",
 ]) {
-	check(`任何角色都不得写 ${file}（deny * / fail-closed）`, () => {
-		assertDenied("arch", file);
+	check(`任何角色都不得写 ${file}（deny * / fail-closed${WINDOW_ACTIVE ? "；窗口内 arch 例外" : ""}）`, () => {
+		if (WINDOW_ACTIVE && WINDOW_ARCH_ALLOW.has(file)) assertAllowed("arch", file);
+		else assertDenied("arch", file);
 		assertDenied("dev", file);
 		assertDenied("qa", file);
 	});
@@ -191,7 +205,8 @@ for (const file of ["templates/board.template.md", "templates/report.template.md
 }
 for (const file of ["templates/pre-commit", "templates/pre-push"]) {
 	check(`pre-commit/pre-push 仍全角色拒绝 ${file}`, () => {
-		assertDenied("arch", file);
+		if (WINDOW_ACTIVE && WINDOW_ARCH_ALLOW.has(file)) assertAllowed("arch", file);
+		else assertDenied("arch", file);
 		assertDenied("dev", file);
 		assertDenied("qa", file);
 	});
@@ -206,7 +221,21 @@ check("TASK-002 / TASK-003 通道段已从 policy 全量删除", () => {
 	assert.ok(!text.includes("END TASK-003"), "policy.txt 仍残留 END TASK-003 通道段");
 });
 
-check("deny * .omp/hooks/** 与 deny * bin/** 已 fail-closed 自动恢复", () => {
+check("deny * .omp/hooks/** 与 deny * bin/** 在回收后 fail-closed 自动恢复", () => {
+	if (WINDOW_ACTIVE) {
+		// 窗口生效期：四条 deny 注释停用，窗口块保留「恢复原文」注释供无损回收。
+		for (const pattern of [
+			/^# deny arch \.omp\/hooks\/\*\*$/m,
+			/^# deny arch bin\/\*\*$/m,
+			/^# deny \* \.omp\/hooks\/\*\*$/m,
+			/^# deny \* bin\/\*\*$/m,
+		]) {
+			assert.ok(pattern.test(POLICY_TEXT), `窗口停用的 deny 行未按附录 A 注释：${pattern}`);
+		}
+		assert.match(POLICY_TEXT, /恢复原文（回收时取消注释）/, "窗口块缺恢复原文注释");
+		assert.match(POLICY_TEXT, /^allow arch \.omp\/hooks\/pre\/trio-guard\.ts$/m, "窗口 allow 缺失");
+		return;
+	}
 	assert.ok(
 		/^deny\s+\*\s+\.omp\/hooks\/\*\*\s*$/m.test(POLICY_TEXT),
 		"deny * .omp/hooks/** 未恢复（应等于 fail-closed 角色级 deny）",

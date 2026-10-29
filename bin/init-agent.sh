@@ -215,6 +215,7 @@ create_file "${TARGET_DIR}/.omp/extensions/trio-session-name.ts" \
 printf '\n[5/6] 提交前兜底门禁（git pre-commit）\n'
 create_file "${GIT_DIR_ABS}/hooks/pre-commit" "${SCAFFOLD_ROOT}/templates/pre-commit" "755" 1
 create_file "${GIT_DIR_ABS}/hooks/pre-push" "${SCAFFOLD_ROOT}/templates/pre-push" "755" 1
+create_file "${GIT_DIR_ABS}/hooks/post-commit" "${SCAFFOLD_ROOT}/templates/post-commit" "755" 1
 create_file "${TARGET_DIR}/bin/trio-check-report.mjs" \
 	"${SCAFFOLD_ROOT}/bin/trio-check-report.mjs" "755" 1
 create_file "${TARGET_DIR}/bin/trio-policy-eval.mjs" \

@@ -8,10 +8,14 @@
 #
 # dev 放行路径（TASK-002 v2 / ADR-0002）：
 #   A 正常任务：board.qa_report -> 本任务目录 qa-*-report-*.md -> 校验器通过
-#               -> 报告基线 commit 是待推 local_sha 的祖先 -> 看板 qa_passed/user_signed
+#               -> 报告基线 commit == 待推 local_sha（或 B..S delta 仅文档路径）
+#               -> 看板 qa_passed/user_signed
 #   B 自举/维护：board.release_gate=exempt(<reason>) + 决策记录含裁决引用
 #               -> 放行并输出审计行
 #   两者都不满足 -> exit 1，stderr 指明缺失项。
+#
+# TASK-007 加固：启动时自证 gate-version（漂移 fail-closed）；放行前输出
+# .git/trio-audit.log 的 bypass 行（--no-verify 绕过可检出）。
 #
 # 无 TRIO_ROLE -> 放行（用户本人的人工逃生舱，与 pre-commit 同语义）。
 #
@@ -21,6 +25,8 @@ set -uo pipefail
 
 readonly BOARD_GLOB="docs/task/*/board.md"
 readonly VALIDATOR_REL="bin/trio-check-report.mjs"
+readonly POLICY_REL=".omp/trio/policy.txt"
+readonly EXPECTED_GATE_VERSION=1
 readonly SELF="$(basename "$0")"
 
 log_error() { printf '%s: %s\n' "$SELF" "$*" >&2; }
@@ -70,22 +76,96 @@ resolve_commit() {
 	git rev-parse -q --verify "${sha}^{commit}" 2>/dev/null || true
 }
 
-check_baseline_ancestor() {
+# AC-5：执法件版本自证 —— policy 声明的 gate-version 必须等于本件 EXPECTED。
+check_gate_version() {
+	local root="$1" policy declared
+	policy="${root}/${POLICY_REL}"
+	if [[ ! -f "$policy" ]]; then
+		log_error "TRIO 发布门禁：执法件版本漂移 —— policy 缺失（缺 # gate-version 声明）"
+		return 1
+	fi
+	declared="$(sed -n 's/^# gate-version:[[:space:]]*\([0-9][0-9]*\).*$/\1/p' "$policy" | head -1)"
+	if [[ -z "$declared" ]]; then
+		log_error "TRIO 发布门禁：执法件版本漂移 —— # gate-version 声明缺失"
+		return 1
+	fi
+	if [[ "$declared" != "$EXPECTED_GATE_VERSION" ]]; then
+		log_error "TRIO 发布门禁：执法件版本漂移 —— 声明 ${declared} ≠ 执法件内嵌 ${EXPECTED_GATE_VERSION}"
+		return 1
+	fi
+	return 0
+}
+
+# AC-7：放行前输出审计日志中的全部 bypass 行（审计缺失视为无 bypass）。
+print_bypass_audit() {
+	local git_dir audit
+	git_dir="$(git rev-parse --git-dir 2>/dev/null || true)"
+	[[ -n "$git_dir" ]] || return 0
+	audit="${git_dir}/trio-audit.log"
+	if [[ ! -f "$audit" ]]; then
+		log_info "审计：无 bypass 记录"
+		return 0
+	fi
+	local line found=0
+	while IFS= read -r line; do
+		found=1
+		log_info "审计 bypass：${line}"
+	done < <(grep 'bypass' "$audit" 2>/dev/null || true)
+	[[ "$found" -eq 1 ]] || log_info "审计：无 bypass 记录"
+}
+
+# TASK-007 §4.3 / AC-4：报告基线 MUST == 待推 local_sha；
+# 或基线..local_sha 的 delta 仅含非代码路径（DOCS_WHITELIST）才免复测放行。
+# 旧「基线是待推祖先」已证可穿透（旧绿 commit 永远是 tip 的祖先），不再放行。
+is_docs_path() {
+	case "$1" in
+		docs/* | CHANGELOG.md | *.md) return 0 ;;
+	esac
+	return 1
+}
+
+check_baseline() {
 	local baseline="$1" local_sha="$2"
 	if [[ -z "$local_sha" ]] || is_zero_sha "$local_sha"; then
 		return 0
 	fi
-	local commit
+	local commit base_commit
 	commit="$(resolve_commit "$local_sha")"
 	if [[ -z "$commit" ]]; then
-		log_error "TRIO 发布门禁：无法解析待推 commit '${local_sha}'，不能校验 merge-base"
+		log_error "TRIO 发布门禁：无法解析待推 commit '${local_sha}'，不能校验基线"
 		return 1
 	fi
-	if ! git merge-base --is-ancestor "$baseline" "$commit" >/dev/null 2>&1; then
-		log_error "TRIO 发布门禁：merge-base 校验失败 —— 基线 ${baseline} 不是待推 commit ${commit} 的祖先"
+	base_commit="$(resolve_commit "$baseline")"
+	if [[ -z "$base_commit" ]]; then
+		log_error "TRIO 发布门禁：无法解析报告基线 commit '${baseline}'，不能校验基线"
 		return 1
 	fi
-	return 0
+	if [[ "$base_commit" == "$commit" ]]; then
+		log_info "基线 == 待推 ${commit}（基线项通过）"
+		return 0
+	fi
+
+	local -a delta=()
+	mapfile -t delta < <(git diff --name-only "$base_commit..$commit" 2>/dev/null)
+	if [[ ${#delta[@]} -eq 0 ]]; then
+		log_error "TRIO 发布门禁：基线 ${base_commit} ≠ 待推 ${commit}，且无法计算 delta（疑似非祖先）"
+		return 1
+	fi
+	local -a code_paths=()
+	local path
+	for path in "${delta[@]}"; do
+		[[ -z "$path" ]] && continue
+		is_docs_path "$path" || code_paths+=("$path")
+	done
+	if [[ ${#code_paths[@]} -eq 0 ]]; then
+		log_info "基线 ${base_commit} ≠ 待推 ${commit}，delta 仅含文档路径（${#delta[@]} 个）→ 免复测放行"
+		return 0
+	fi
+	log_error "TRIO 发布门禁：基线 ≠ 待推，delta 含代码路径，需 QA 重跑"
+	log_error "  基线：${base_commit}"
+	log_error "  待推：${commit}"
+	log_error "  代码路径：${code_paths[*]}"
+	return 1
 }
 
 # qa_report 必须与 board 同任务目录，且文件名符合 qa-*-report-*.md。
@@ -142,7 +222,7 @@ check_path_a() {
 
 	local sha
 	for sha in "${refs[@]}"; do
-		check_baseline_ancestor "$baseline" "$sha" || return 1
+		check_baseline "$baseline" "$sha" || return 1
 	done
 	return 0
 }
@@ -169,6 +249,7 @@ check_path_b() {
 ROLE="${TRIO_ROLE:-}"
 if [[ -z "$ROLE" ]]; then
 	log_info "TRIO_ROLE 未设置 → 跳过发布校验（人工推送放行）"
+	print_bypass_audit
 	exit 0
 fi
 case "${ROLE,,}" in
@@ -188,6 +269,8 @@ PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
 	exit 0
 }
 cd "$PROJECT_ROOT" || exit 1
+
+check_gate_version "$PROJECT_ROOT" || exit 1
 
 if [[ "$ROLE" == "arch" || "$ROLE" == "qa" ]]; then
 	log_error "TRIO 发布门禁：arch / qa 无发布权（禁止 push / tag）"
@@ -248,6 +331,7 @@ done
 
 if [[ "$allowed" -eq 1 ]]; then
 	log_info "TRIO 发布门禁：dev 推送放行"
+	print_bypass_audit
 	log_info "提醒：qa_passed → user_signed 之间的发布仍按 DEV 规则纪律，需等用户终验签字"
 	exit 0
 fi

@@ -313,6 +313,44 @@ check("填充后的模板可通过校验", () => {
 	);
 });
 
+// ── 11.5 T11 根因分类机检（TASK-007 AC-9）──────────────────────────────────
+
+console.log("\n[T11 根因分类]");
+
+const FAIL_ROW = "| AC-3 | tests/test_net.py | 未通过 | 期望 1；实际 2；复现 bun test；[根因:实现] |";
+const FAIL_BASE = GOOD
+	.replace(
+		"| AC-3 | tests/test_net.py | SKIP | 跳过原因 缺外部网络；解除条件 提供 mock server |",
+		FAIL_ROW,
+	)
+	.replace("总判定：半通过", "总判定：未通过")
+	.replace("未通过 0、SKIP 1", "未通过 1、SKIP 0");
+
+check("未通过行含 [根因:实现] → 无 T11", () => {
+	const hit = checkText(GOOD_NAME, FAIL_BASE).find((violation) => violation.rule === "T11");
+	assert.equal(hit, undefined, `带根因标签仍报 T11：${hit?.message}`);
+});
+
+for (const tag of ["[根因:实现]", "[根因:契约]", "[根因:用例]", "[根因:环境]"]) {
+	check(`根因标签 ${tag} 均被接受`, () => {
+		const text = FAIL_BASE.replace("[根因:实现]", tag);
+		const hit = checkText(GOOD_NAME, text).find((violation) => violation.rule === "T11");
+		assert.equal(hit, undefined, `${tag} 未被识别`);
+	});
+}
+
+check("未通过行缺根因标签 → T11（AC-9 机检件）", () => {
+	const text = FAIL_BASE.replace("；[根因:实现]", "");
+	const hit = checkText(GOOD_NAME, text).find((violation) => violation.rule === "T11");
+	assert.ok(hit, "缺根因分类却未报 T11");
+	assert.match(hit.message, /根因/u);
+});
+
+check("半通过行不强制根因标签 → 无 T11", () => {
+	const hit = checkText(GOOD_NAME, GOOD).find((violation) => violation.rule === "T11");
+	assert.equal(hit, undefined);
+});
+
 // ── 12. T10 路径存在性（TASK-003 / spec §1.5、AC-5/6/7）────────────────────
 
 console.log("\n[T10 路径存在性]");

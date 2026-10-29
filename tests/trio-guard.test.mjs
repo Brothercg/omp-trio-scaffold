@@ -23,6 +23,18 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..");
 const POLICY = fs.readFileSync(path.join(ROOT, ".omp", "trio", "policy.txt"), "utf8");
 
+// TASK-007 窗口（ADR-0003）：窗口内 arch 对七个精确执行件放行；回收后 deny * 恢复。
+const WINDOW_ACTIVE = POLICY.includes("BEGIN TASK-007");
+const WINDOW_ARCH_ALLOW = new Set([
+	".omp/hooks/pre/trio-guard.ts",
+	"templates/pre-push",
+	"templates/post-commit",
+	"bin/trio-check-report.mjs",
+	"bin/trio-mutation-check.mjs",
+	"bin/trio-selftest.sh",
+	"bin/init-agent.sh",
+]);
+
 // ── 断言框架 ───────────────────────────────────────────────────────────────
 
 let passed = 0;
@@ -247,6 +259,11 @@ for (const target of [
 	"templates/pre-commit",
 ]) {
 	for (const role of ["dev", "arch", "qa"]) {
+		if (role === "arch" && WINDOW_ACTIVE && WINDOW_ARCH_ALLOW.has(target)) {
+			await expectAllow(`[arch] 窗口内精确单文件放行：${target}`, role, "write",
+				{ path: target, content: "x" });
+			continue;
+		}
 		await expectBlock(`[${role}] 不得写 ${target}（deny * / fail-closed）`, role, "write",
 			{ path: target, content: "x" });
 	}
@@ -272,15 +289,29 @@ assert.ok(
 	!/END TASK-00[23]/.test(policyText),
 	"policy.txt 仍残留 END TASK-002 / TASK-003 通道段，应被整段删除",
 );
-assert.ok(
-	/^deny\s+\*\s+\.omp\/hooks\/\*\*$/m.test(policyText),
-	"deny * .omp/hooks/** 未恢复",
-);
-assert.ok(
-	/^deny\s+\*\s+bin\/\*\*$/m.test(policyText),
-	"deny * bin/** 未恢复",
-);
-console.log("  ✓ 回收核验：BEGIN/END TASK-00[23] 清零 + deny * .omp/hooks/** 与 deny * bin/** 恢复");
+if (WINDOW_ACTIVE) {
+	for (const pattern of [
+		/^# deny arch \.omp\/hooks\/\*\*$/m,
+		/^# deny arch bin\/\*\*$/m,
+		/^# deny \* \.omp\/hooks\/\*\*$/m,
+		/^# deny \* bin\/\*\*$/m,
+	]) {
+		assert.ok(pattern.test(policyText), `窗口停用 deny 行缺失：${pattern}`);
+	}
+	assert.match(policyText, /恢复原文（回收时取消注释）/, "窗口块缺恢复原文注释");
+	assert.match(policyText, /^# gate-version: 1$/m, "policy 缺 gate-version 声明");
+	console.log("  ✓ 窗口核验：TASK-007 BEGIN 段 + 四条 deny 注释停用 + 恢复原文注释 + gate-version");
+} else {
+	assert.ok(
+		/^deny\s+\*\s+\.omp\/hooks\/\*\*$/m.test(policyText),
+		"deny * .omp/hooks/** 未恢复",
+	);
+	assert.ok(
+		/^deny\s+\*\s+bin\/\*\*$/m.test(policyText),
+		"deny * bin/** 未恢复",
+	);
+	console.log("  ✓ 回收核验：BEGIN/END TASK-00[23] 清零 + deny * .omp/hooks/** 与 deny * bin/** 恢复");
+}
 
 // fail-closed —— 通道是精确文件放行，不是目录开洞；回收后通道位置回到 deny 全覆盖。
 await expectBlock("[dev] .omp/hooks/ 其他文件拒绝（fail-closed）", "dev", "write",
@@ -298,7 +329,9 @@ console.log("\n[BUG-1 回归：策略变更即时生效 / 缺失 fail-closed / �
 const BUG_PROJECT = makeProject();
 const bugCall = makeHook(BUG_PROJECT); // 独立 hook 实例（内聚 own cachedRules）
 const POLICY_FIXTURE = path.join(BUG_PROJECT, ".omp", "trio", "policy.txt");
-const setPolicy = (text) => fs.writeFileSync(POLICY_FIXTURE, text);
+// 每次写 fixture 策略都带 gate-version，避免版本漂移 fail-closed 污染被测语义。
+const setPolicy = (text) =>
+	fs.writeFileSync(POLICY_FIXTURE, text.includes("gate-version") ? text : `${text}\n# gate-version: 1\n`);
 
 async function bugAs(role, toolName, input) {
 	const previous = process.env.TRIO_ROLE;
@@ -367,7 +400,7 @@ await check("D/AC-5 guard 判定与 pre-commit 判定对同一路径矩阵结论
 		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "trio-guard-dual-"));
 		try {
 			fs.mkdirSync(path.join(dir, ".omp", "trio"), { recursive: true });
-			fs.writeFileSync(path.join(dir, ".omp", "trio", "policy.txt"), tc.policy);
+			fs.writeFileSync(path.join(dir, ".omp", "trio", "policy.txt"), `${tc.policy}\n# gate-version: 1\n`);
 			let handler = null;
 			registerGuard({ on: (e, fn) => (handler = fn) });
 			const prev = process.env.TRIO_ROLE;
@@ -388,7 +421,7 @@ await check("D/AC-5 guard 判定与 pre-commit 判定对同一路径矩阵结论
 			try {
 				execFileSync("git", ["init", "-q"], { cwd: repo });
 				fs.mkdirSync(path.join(repo, ".omp", "trio"), { recursive: true });
-				fs.writeFileSync(path.join(repo, ".omp", "trio", "policy.txt"), tc.policy);
+				fs.writeFileSync(path.join(repo, ".omp", "trio", "policy.txt"), `${tc.policy}\n# gate-version: 1\n`);
 				// 待判文件造出 staging 面：写入 tc.path 同形态目录
 				const stagedPath = tc.path;
 				fs.mkdirSync(path.dirname(path.join(repo, stagedPath)), { recursive: true });
@@ -441,7 +474,7 @@ await check("D2/AC-5 bash 写意图 guard 拦截与 pre-commit deny 结论一致
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "trio-guard-bash-"));
 	try {
 		fs.mkdirSync(path.join(dir, ".omp", "trio"), { recursive: true });
-		fs.writeFileSync(path.join(dir, ".omp", "trio", "policy.txt"), "deny * .omp/trio/**\n");
+		fs.writeFileSync(path.join(dir, ".omp", "trio", "policy.txt"), "deny * .omp/trio/**\n# gate-version: 1\n");
 		let handler = null;
 		registerGuard({ on: (e, fn) => (handler = fn) });
 		const prev = process.env.TRIO_ROLE;
@@ -527,6 +560,160 @@ await check("J/AC-1+AC-5 deny→allow 变更后第一次判定：文案/结果�
 	const r = await bugAs("dev", "write", { path: "j.txt", content: "x" });
 	assert.equal(r.blocked, false, `deny→allow 边界未即时换新快照：${r.reason}`);
 });
+
+// ── TASK-007 切片 A：AC-1/2/3/5/6 门禁加固回归 ──────────────────────────────
+
+console.log("\n[TASK-007 AC-1 bash 全矩阵]");
+
+const T7 = fs.mkdtempSync(path.join(os.tmpdir(), "trio-t7-"));
+fs.mkdirSync(path.join(T7, ".omp", "trio"), { recursive: true });
+fs.mkdirSync(path.join(T7, "src"), { recursive: true });
+fs.mkdirSync(path.join(T7, "tests"), { recursive: true });
+fs.mkdirSync(path.join(T7, "docs", "task", "T"), { recursive: true });
+fs.writeFileSync(
+	path.join(T7, ".omp", "trio", "policy.txt"),
+	"allow arch docs/**\nallow qa tests/**\ndeny arch src/**\n# gate-version: 1\n",
+);
+let t7handler = null;
+registerGuard({ on: (e, fn) => (t7handler = fn) });
+async function t7call(role, toolName, input) {
+	const prev = process.env.TRIO_ROLE;
+	if (role === null) delete process.env.TRIO_ROLE;
+	else process.env.TRIO_ROLE = role;
+	try {
+		return await t7handler({ toolName, input }, { cwd: T7 });
+	} finally {
+		if (prev === undefined) delete process.env.TRIO_ROLE;
+		else process.env.TRIO_ROLE = prev;
+	}
+}
+
+await check("AC-1 arch `cp /tmp/f src/x.py` 被拒（不再只查 deny）", async () => {
+	const r = await t7call("arch", "bash", { command: "cp /tmp/f src/x.py" });
+	assert.equal(r?.block, true, "arch 越权 bash 写 src/ 未被拦截");
+	assert.match(r.reason, /src\/x\.py|白名单|禁止规则/u);
+});
+
+await check("AC-1 qa `tee tests/y.py` 允许（policy allow qa tests/**）", async () => {
+	const r = await t7call("qa", "bash", { command: "tee tests/y.py" });
+	assert.notEqual(r?.block, true, `qa 合法 bash 写被误拦：${r?.reason}`);
+});
+
+await check("AC-1 arch `tee docs/note.md` 允许（allow arch docs/**）", async () => {
+	const r = await t7call("arch", "bash", { command: "tee docs/note.md" });
+	assert.notEqual(r?.block, true, `arch 合法 bash 写被误拦：${r?.reason}`);
+});
+
+console.log("\n[TASK-007 AC-2 symlink 拒穿透]");
+
+fs.symlinkSync("../../../src", path.join(T7, "docs", "task", "T", "l"), "dir");
+
+await check("AC-2 write 经 symlink 落 src/ 被拒并明示 symlink 穿透", async () => {
+	const r = await t7call("arch", "write", { path: "docs/task/T/l/evil.py", content: "x" });
+	assert.equal(r?.block, true, "symlink 穿透未被拦截（词法 docs/ 被放行）");
+	assert.match(r.reason, /symlink 穿透/u);
+});
+
+await check("AC-2 bash 经 symlink 落 src/ 被拒", async () => {
+	const r = await t7call("arch", "bash", { command: "cp /tmp/f docs/task/T/l/evil.py" });
+	assert.equal(r?.block, true, "bash symlink 穿透未被拦截");
+	assert.match(r.reason, /symlink 穿透/u);
+});
+
+console.log("\n[TASK-007 AC-3 跨 worktree 出根]");
+
+const WT = fs.mkdtempSync(path.join(os.tmpdir(), "trio-wt-"));
+fs.mkdirSync(path.join(WT, ".omp", "trio"), { recursive: true });
+fs.writeFileSync(path.join(WT, ".omp", "trio", "policy.txt"), "allow dev src/**\n# gate-version: 1\n");
+const { execFileSync } = await import("node:child_process");
+execFileSync("git", ["init", "-q"], { cwd: WT });
+execFileSync("git", ["config", "user.email", "t@t"], { cwd: WT });
+execFileSync("git", ["config", "user.name", "t"], { cwd: WT });
+fs.writeFileSync(path.join(WT, "a.txt"), "x");
+execFileSync("git", ["add", "a.txt"], { cwd: WT });
+execFileSync("git", ["commit", "-q", "-m", "root"], { cwd: WT });
+const WT2 = fs.mkdtempSync(path.join(os.tmpdir(), "trio-wt2-"));
+fs.rmdirSync(WT2);
+execFileSync("git", ["worktree", "add", "-q", WT2], { cwd: WT });
+fs.mkdirSync(path.join(WT2, "src"), { recursive: true });
+let wtHandler = null;
+registerGuard({ on: (e, fn) => (wtHandler = fn) });
+async function wtCall(role, input) {
+	const prev = process.env.TRIO_ROLE;
+	process.env.TRIO_ROLE = role;
+	try {
+		return await wtHandler({ toolName: "write", input }, { cwd: WT });
+	} finally {
+		if (prev === undefined) delete process.env.TRIO_ROLE;
+		else process.env.TRIO_ROLE = prev;
+	}
+}
+
+await check("AC-3 写另一 worktree 的 src/x.py 被拒并提示跨 worktree", async () => {
+	const r = await wtCall("dev", { path: path.join(WT2, "src", "x.py"), content: "x" });
+	assert.equal(r?.block, true, "跨 worktree 写入未被拦截");
+	assert.match(r.reason, /跨 worktree/u);
+});
+
+await check("AC-3 /tmp/x.py（非任何 worktree 根内）放行（不受管辖）", async () => {
+	const r = await wtCall("dev", { path: "/tmp/x.py", content: "x" });
+	assert.notEqual(r?.block, true, `系统路径被误拦：${r?.reason}`);
+});
+
+console.log("\n[TASK-007 AC-5 执法件版本自证]");
+
+const GV = fs.mkdtempSync(path.join(os.tmpdir(), "trio-gv-"));
+fs.mkdirSync(path.join(GV, ".omp", "trio"), { recursive: true });
+fs.mkdirSync(path.join(GV, "src"), { recursive: true });
+let gvHandler = null;
+registerGuard({ on: (e, fn) => (gvHandler = fn) });
+async function gvCall(policyText, toolName, input) {
+	fs.writeFileSync(path.join(GV, ".omp", "trio", "policy.txt"), policyText);
+	const prev = process.env.TRIO_ROLE;
+	process.env.TRIO_ROLE = "dev";
+	try {
+		return await gvHandler({ toolName, input }, { cwd: GV });
+	} finally {
+		if (prev === undefined) delete process.env.TRIO_ROLE;
+		else process.env.TRIO_ROLE = prev;
+	}
+}
+
+await check("AC-5 声明 gate-version: 2 ≠ EXPECTED=1 → fail-closed 明示漂移", async () => {
+	const r = await gvCall("allow dev src/**\n# gate-version: 2\n", "write", { path: "src/a.py", content: "x" });
+	assert.equal(r?.block, true, "版本漂移未被 fail-closed");
+	assert.match(r.reason, /执法件版本漂移/u);
+});
+
+await check("AC-5 gate-version 缺失 → fail-closed 明示漂移", async () => {
+	const r = await gvCall("allow dev src/**\n", "write", { path: "src/a.py", content: "x" });
+	assert.equal(r?.block, true, "缺失 gate-version 未 fail-closed");
+	assert.match(r.reason, /执法件版本漂移|缺 # gate-version/u);
+});
+
+await check("AC-5 版本一致 → 正常执行", async () => {
+	const r = await gvCall("allow dev src/**\n# gate-version: 1\n", "write", { path: "src/a.py", content: "x" });
+	assert.notEqual(r?.block, true, `版本一致却拦截：${r?.reason}`);
+});
+
+console.log("\n[TASK-007 AC-6 无身份醒目提示]");
+
+await check("AC-6 TRIO_ROLE 未设置 → 放行且每次附醒目提示（不静默）", async () => {
+	const first = await t7call(null, "write", { path: "src/a.py", content: "x" });
+	assert.notEqual(first?.block, true, "无身份不应拦截");
+	assert.match(String(first?.additionalContext ?? ""), /无身份运行，门禁未生效/u);
+	const second = await t7call(null, "bash", { command: "cp /tmp/f src/a.py" });
+	assert.notEqual(second?.block, true);
+	assert.match(String(second?.additionalContext ?? ""), /无身份运行，门禁未生效/u);
+});
+
+fs.rmSync(T7, { recursive: true, force: true });
+fs.rmSync(GV, { recursive: true, force: true });
+try {
+	execFileSync("git", ["worktree", "remove", "--force", WT2], { cwd: WT });
+} catch {}
+fs.rmSync(WT, { recursive: true, force: true });
+fs.rmSync(WT2, { recursive: true, force: true });
 
 fs.rmSync(BUG_PROJECT, { recursive: true, force: true });
 

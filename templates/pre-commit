@@ -23,6 +23,7 @@
 set -uo pipefail
 
 readonly POLICY_REL=".omp/trio/policy.txt"
+readonly EXPECTED_GATE_VERSION=1
 readonly SELF="$(basename "$0")"
 
 log_error() { printf '%s: %s\n' "$SELF" "$*" >&2; }
@@ -30,9 +31,20 @@ log_info() { printf '%s: %s\n' "$SELF" "$*"; }
 
 # ── 角色校验 ───────────────────────────────────────────────────────────────
 
+GIT_DIR_PATH="$(git rev-parse --git-dir 2>/dev/null || true)"
+readonly MARKER_REL="trio-last-gate-ok"
+
+# TASK-007 §4.2：本 hook 真正跑完（放行）即写 marker，供 post-commit 区分
+# 「正常提交」与「--no-verify 绕过」。仓库目录不可得时静默跳过。
+write_gate_marker() {
+	[[ -n "$GIT_DIR_PATH" ]] || return 0
+	printf '%s\n' "$(date +%s)" >"${GIT_DIR_PATH}/${MARKER_REL}" 2>/dev/null || true
+}
+
 ROLE="${TRIO_ROLE:-}"
 if [[ -z "$ROLE" ]]; then
 	log_info "TRIO_ROLE 未设置 → 跳过角色校验（人工提交放行）"
+	write_gate_marker
 	exit 0
 fi
 # 归一化：兼容旧别名 pm → arch。
@@ -58,7 +70,28 @@ PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
 PROJECT_ROOT="$(cd "$PROJECT_ROOT" && pwd)"
 POLICY_FILE="${PROJECT_ROOT}/${POLICY_REL}"
 
+# AC-5：执法件版本自证（与 guard / pre-push 同判）——声明缺失/不符 fail-closed。
+check_gate_version() {
+	local declared
+	if [[ ! -f "$POLICY_FILE" ]]; then
+		log_error "执法件版本漂移：policy 缺失（缺 # gate-version 声明）"
+		return 1
+	fi
+	declared="$(sed -n 's/^# gate-version:[[:space:]]*\([0-9][0-9]*\).*$/\1/p' "$POLICY_FILE" | head -1)"
+	if [[ -z "$declared" ]]; then
+		log_error "执法件版本漂移：# gate-version 声明缺失"
+		return 1
+	fi
+	if [[ "$declared" != "$EXPECTED_GATE_VERSION" ]]; then
+		log_error "执法件版本漂移：policy 声明 ${declared} ≠ 执法件内嵌 ${EXPECTED_GATE_VERSION}"
+		return 1
+	fi
+	return 0
+}
+
 STAGED="$(git diff --cached --name-only --diff-filter=ACMRDT 2>/dev/null)"
+
+check_gate_version || exit 1
 
 # ── 共享策略判定器 ─────────────────────────────────────────────────────────
 # 直接复用 guard 的 loadPolicy / decide / describeVerdict（单一实现，双面同裁决）。
@@ -133,4 +166,5 @@ if [[ ${#REPORTS[@]} -gt 0 ]]; then
 	fi
 fi
 
+write_gate_marker
 exit 0

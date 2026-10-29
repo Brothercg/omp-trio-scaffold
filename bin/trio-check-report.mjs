@@ -17,6 +17,8 @@
  *   T8 汇总       非表格短文；总判定须与行值机械推导一致；SKIP 单列计账
  *   T9 载体       仅 Markdown，禁伴随 .json/.csv/.xlsx/.parquet
  *   T10 路径     反引号 docs//src//tests//bin/ 路径必须真实存在
+ *   T11 根因     结论为「未通过」的说明必须含 [根因:实现]/[根因:契约]/[根因:用例]/[根因:环境] 之一
+ *                （ADR-0013 §2.3：无分类不计熔断轮，机检件即本规则）
  *
  * 用法：
  *   bun bin/trio-check-report.mjs docs/task/<slug>/qa-20261025-1510-report-x.md
@@ -57,6 +59,9 @@ const TOTAL_VERDICT = /总判定[：:]\s*\**\s*(半通过|未通过|通过)/;
 
 /** T8 SKIP 条数 */
 const SKIP_COUNT = /SKIP\s*([0-9]+)/;
+
+/** T11 未通过行的根因分类标签（ADR-0013 §2.3）。 */
+export const ROOT_CAUSE_TAGS = ["[根因:实现]", "[根因:契约]", "[根因:用例]", "[根因:环境]"];
 
 /** T8 禁止把 SKIP 当作通过 */
 const SKIP_AS_PASS = /SKIP[^\n]{0,16}(计入|算作|视为)\s*通过/;
@@ -300,6 +305,17 @@ export function checkRows(rows) {
 			}
 		} else if (!location || PLACEHOLDERS.has(location)) {
 			out.push(new Violation(line, "T5", `结论为${verdict}时位置必填（文件:行 / 函数）`));
+		}
+
+		// T11 根因分类（仅「未通过」强制；ADR-0013 §2.3）
+		if (verdict === "未通过" && !ROOT_CAUSE_TAGS.some((tag) => note.includes(tag))) {
+			out.push(
+				new Violation(
+					line,
+					"T11",
+					`结论为未通过时说明缺根因分类（${ROOT_CAUSE_TAGS.join(" / ")} 之一）`,
+				),
+			);
 		}
 
 		// T7 说明要件
