@@ -13,9 +13,9 @@
 
 | 字段 | 值 |
 |---|---|
-| 当前状态 | `blocked`（QA 第 1 轮：28/30 通过，1 条 [根因:契约] contract-gap 待 ARCH 裁决——AC-2cf/AC-2f 单件写入失败的整体 rc 语义；熔断 0/3） |
-| 最后推进人 | `QA` |
-| 最后更新 | `2026-10-29 17:58` |
+| 当前状态 | `waiting_user`（B-2 已裁决：verdict-1「失败即整体非 0」+ spec v2；rc 修复待无角色窗口落盘 → QA 第 2 轮；熔断 0/3） |
+| 最后推进人 | `ARCH` |
+| 最后更新 | `2026-10-29 18:13` |
 
 ### 处置流程
 
@@ -43,25 +43,26 @@
 | 编号 | 类型 | 描述 | 待谁 |
 |---|---|---|---|
 | B-1 | 执行落地 | ~~无角色窗口执行~~ 已完成：`dev-20261029-1734-release.md` | 已关闭 |
-| B-2 | contract-gap | AC-2f：下游 init 中单件 `create_file` 失败（只读文件场景）时整体 rc=0、无失败汇总，spec §6 未裁决「成员件失败是否否决整次 init」。复现 `qa-20261029-1758-report-回复结构内建-第1轮.md` AC-2f 行 | ARCH |
+| B-2 | contract-gap | AC-2f：下游 init 中单件 `create_file` 失败（只读文件场景）时整体 rc=0、无失败汇总，spec §6 未裁决「成员件失败是否否决整次 init」。复现 `qa-20261029-1758-report-回复结构内建-第1轮.md` AC-2f 行 | 已裁决（verdict-1：失败即整体非 0，过程尽力结果硬；spec v2；dev 修复项 → 无角色窗口 `arch-20261029-1813-prompt-init-rc修复.md`） |
 
 ## 5. 决策记录
 
 | 时间 | 议题 | 裁决 | 落点 |
 |---|---|---|---|
 | 2026-10-29 | 回复结构内建方案 | 用户拍板「按推荐」：A 注入文档 + B 精简自查清单；C 机械执法列二期 spike（先核实 omp 挂点）；D 不另开发 | `arch-20261029-1723-spec.md` v1 |
+| 2026-10-29 18:13 | B-2/AC-2f init 单件失败整体 rc 语义 | 判契约缺口；裁决「失败即整体非 0」（过程尽力、结果硬：不中断后续件、失败汇总+清单、K>0 即 exit 1）；否决「尽力而为 rc=0」（退出码说谎，与 spec §6 字面冲突） | `arch-20261029-1813-verdict-1.md`、spec v2 |
 
 ## 6. 交接备注
 
-> **当前承接方：ARCH**——裁决 B-2（AC-2f 单件失败整体 rc 语义属 contract-gap，
-> spec §6 补一句或出 verdict）。QA 全部行为面已过（28/30，仅 1 契约缺口），
-> 裁决后若无实现改动即第 2 轮复测收 qa_passed。
+> **当前承接方：无角色执行窗口**——落 rc 修复（verdict-1 后果三项，提示词
+> `arch-20261029-1813-prompt-init-rc修复.md`）；QA 行为面 28/30 已过，
+> 修复落盘后 QA 第 2 轮复测 AC-2f/AC-2cf 收口。
 
 ```text
-【任务】TASK-008 QA 第 1 轮对抗
-【输入】arch-20261029-1723-spec.md + dev-20261029-1734-release.md
-【期望】注入/升级/幂等、简报逐字、selftest 正负态、零回归
-【完成】qa-*-report-*.md（未通过行带 [根因:*]）→ board qa_passed
+【任务】TASK-008 init rc 修复（verdict-1 落地）
+【输入】arch-20261029-1813-verdict-1.md + arch-20261029-1813-prompt-init-rc修复.md
+【期望】只读目标 rc=1 + 失败汇总；全绿 rc=0；回归全绿
+【完成】dev-*-release-rc修复.md + commit → QA 第 2 轮
 ```
 
 ## 7. 挂起清单
@@ -69,5 +70,7 @@
 | 条目 | 等谁 | 解除条件 |
 |---|---|---|
 | ~~③ 无角色窗口执行~~ | — | 已完成（`dev-20261029-1734-release.md`） |
-| ④ QA 对抗 | QA | 报告全绿 → qa_passed → user_signed |
+| ~~B-2 裁决~~ | — | 已完成（verdict-1 + spec v2，18:13） |
+| init rc 修复（verdict-1 后果三项） | 无角色窗口 | `arch-20261029-1813-prompt-init-rc修复.md` 执行落盘 |
+| ④ QA 对抗 | QA | rc 修复落盘后第 2 轮复测全绿 → qa_passed → user_signed |
 | 二期 C spike（回复前提醒挂点） | 后续 | 核实 omp extension/hook 生命周期 API 后另立任务 |
