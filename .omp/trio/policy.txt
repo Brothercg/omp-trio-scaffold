@@ -104,30 +104,12 @@ deny qa src/**
 deny * .omp/trio/policy.txt
 deny * .git/hooks/pre-commit
 
-# 门禁派生执行件（guard / 模板 hook / 自检脚本）：维护窗口内对 DEV 开放
-# 单文件写权；其余角色、其余路径一律拒绝（deny 优先 + fail-closed）。
-# ↓↓↓ BEGIN TASK-007 临时写通道（ADR-0003 方案 1；用户授权 2026-10-29，ARCH 代施）
-# 回收条件：TASK-006 与 TASK-007 均 user_signed 后由用户整段删除本块，
-#           恢复下方「恢复原文」注释中的 deny 行；QA 按 AC-13 核验。
-# 恢复原文（回收时取消注释）：
-#   deny arch .omp/hooks/**
-#   deny arch bin/**
-#   deny * .omp/hooks/**
-#   deny * bin/**
-allow arch .omp/hooks/pre/trio-guard.ts
-allow arch templates/pre-push
-allow arch templates/post-commit
-allow arch bin/trio-check-report.mjs
-allow arch bin/trio-mutation-check.mjs
-allow arch bin/trio-selftest.sh
-allow arch bin/init-agent.sh
-# ↑↑↑ END TASK-007 临时写通道
 # gate-version: 1
 
-# deny arch .omp/hooks/**
+deny arch .omp/hooks/**
 deny qa .omp/hooks/**
-# deny arch bin/**
+deny arch bin/**
 deny qa bin/**
 
-# deny * .omp/hooks/**
-# deny * bin/**
+deny * .omp/hooks/**
+deny * bin/**
