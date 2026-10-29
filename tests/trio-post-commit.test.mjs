@@ -54,7 +54,11 @@ function makeRepo() {
 function commitFile(repo, content, extra = []) {
 	fs.writeFileSync(path.join(repo, "f.txt"), content);
 	execFileSync("git", ["add", "f.txt"], { cwd: repo });
-	execFileSync("git", ["commit", "-q", "-m", content, ...extra], { cwd: repo });
+	// 脱离会话角色：这些用例验证的是「人工提交 / --no-verify」审计语义，
+	// 继承 QA 会话的 TRIO_ROLE 会让 pre-commit 走角色门禁而非审计路径。
+	const env = { ...process.env };
+	delete env.TRIO_ROLE;
+	execFileSync("git", ["commit", "-q", "-m", content, ...extra], { cwd: repo, env });
 	return execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo }).toString().trim();
 }
 
