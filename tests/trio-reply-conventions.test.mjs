@@ -20,7 +20,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { fileURLToPath } from "node:url";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import assert from "node:assert/strict";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -469,6 +469,44 @@ check("AC-5d 幂等：内容未变化时重跑 init 输出已是最新且不重�
 		assert.match(out, /跳过  docs\/REPLY-CONVENTIONS\.md（已是最新）/u);
 		assert.equal(fs.statSync(dest).mtimeMs, before, "已是最新却发生重写");
 		execFileSync("cmp", [CONVENTIONS, dest]);
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+// ── TASK-008 AC-2f／verdict-1：失败即整体非 0（过程尽力、结果硬）─────────
+
+check("AC-2f 只读目标 → rc=1、失败汇总含路径、后续注入继续", () => {
+	const dir = initTarget();
+	const docs = path.join(dir, "docs");
+	const dest = path.join(dir, INJECTED);
+	try {
+		runInit(dir);
+		fs.writeFileSync(dest, "stale\n");
+		fs.chmodSync(dest, 0o444);
+		fs.chmodSync(docs, 0o555);
+		const r = spawnSync("bash", [INIT_AGENT, dir], { encoding: "utf8" });
+		const out = `${r.stdout}${r.stderr}`;
+		assert.equal(r.status, 1, "只读目标应 exit 1");
+		assert.match(out, /失败  docs\/REPLY-CONVENTIONS\.md：/u);
+		assert.match(out, /失败 1 件/u);
+		assert.match(out, /失败清单：\n  - docs\/REPLY-CONVENTIONS\.md/u);
+		assert.ok(!out.includes("覆盖  docs/REPLY-CONVENTIONS.md"), "失败不得打印「覆盖」");
+		assert.match(out, /\[4\/6\]/u, "单件失败后应继续后续注入");
+	} finally {
+		fs.chmodSync(docs, 0o755);
+		if (fs.existsSync(dest)) fs.chmodSync(dest, 0o644);
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+check("AC-2f 全绿树 → rc=0 且汇总「失败 0 件」", () => {
+	const dir = initTarget();
+	try {
+		const r = spawnSync("bash", [INIT_AGENT, dir], { encoding: "utf8" });
+		const out = `${r.stdout}${r.stderr}`;
+		assert.equal(r.status, 0, "全绿部署应 exit 0");
+		assert.match(out, /完成：新建\/覆盖 \d+ 项，跳过 \d+ 项，失败 0 件。/u);
 	} finally {
 		fs.rmSync(dir, { recursive: true, force: true });
 	}

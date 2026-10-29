@@ -114,19 +114,32 @@ GIT_DIR_ABS="$(cd "${TARGET_DIR}/${GIT_DIR_RAW}" && pwd)"
 
 CREATED=0
 SKIPPED=0
+FAILED=0
 POLICY_DIFF=0
+FAILED_PATHS=()
+
+# fail_file <目标绝对路径> <原因>：计入失败、打印失败行与相对路径，不中断后续注入。
+fail_file() {
+	local rel="${1#"${TARGET_DIR}"/}" reason="$2"
+	printf '  失败  %s：%s\n' "$rel" "$reason"
+	FAILED=$((FAILED + 1))
+	FAILED_PATHS+=("$rel")
+}
 
 # create_file <目标绝对路径> <源文件> <权限> [always_overwrite]
 # always_overwrite=1：门禁执行件，升级时直接覆盖（内容相同则跳过）。
 create_file() {
-	local dest="$1" src="$2" mode="${3:-644}" always="${4:-0}"
+	local dest="$1" src="$2" mode="${3:-644}" always="${4:-0}" msg
 	if [[ -e "$dest" ]]; then
 		if [[ "$always" -eq 1 || "$FORCE" -eq 1 ]]; then
 			if cmp -s "$src" "$dest"; then
 				printf '  跳过  %s（已是最新）\n' "${dest#"${TARGET_DIR}"/}"
 				SKIPPED=$((SKIPPED + 1))
 			else
-				install -m "$mode" "$src" "$dest"
+				if ! msg="$(install -m "$mode" "$src" "$dest" 2>&1)"; then
+					fail_file "$dest" "${msg%%$'\n'*}"
+					return 0
+				fi
 				printf '  覆盖  %s\n' "${dest#"${TARGET_DIR}"/}"
 				CREATED=$((CREATED + 1))
 			fi
@@ -134,12 +147,19 @@ create_file() {
 			printf '  跳过  %s（已存在）\n' "${dest#"${TARGET_DIR}"/}"
 			SKIPPED=$((SKIPPED + 1))
 		fi
-		return
+		return 0
 	fi
-	mkdir -p "$(dirname "$dest")"
-	install -m "$mode" "$src" "$dest"
+	if ! msg="$(mkdir -p "$(dirname "$dest")" 2>&1)"; then
+		fail_file "$dest" "${msg%%$'\n'*}"
+		return 0
+	fi
+	if ! msg="$(install -m "$mode" "$src" "$dest" 2>&1)"; then
+		fail_file "$dest" "${msg%%$'\n'*}"
+		return 0
+	fi
 	printf '  创建  %s\n' "${dest#"${TARGET_DIR}"/}"
 	CREATED=$((CREATED + 1))
+	return 0
 }
 
 # install_policy <目标绝对路径> <上游 policy>
@@ -240,7 +260,17 @@ else
 	TEST_HINT="${SCAFFOLD_ROOT}/bin/trio-selftest.sh"
 fi
 
-printf '\n完成：新建/覆盖 %d 项，跳过 %d 项。\n' "$CREATED" "$SKIPPED"
+printf '\n完成：新建/覆盖 %d 项，跳过 %d 项，失败 %d 件。\n' "$CREATED" "$SKIPPED" "$FAILED"
+if [[ "$FAILED" -gt 0 ]]; then
+	printf '\n失败清单：\n'
+	if [[ "${#FAILED_PATHS[@]}" -gt 0 ]]; then
+		for failed_path in "${FAILED_PATHS[@]}"; do
+			printf '  - %s\n' "$failed_path"
+		done
+	fi
+	printf '\n存在注入失败，退出码非 0；请修复后重跑。\n'
+	exit 1
+fi
 if [[ "$POLICY_DIFF" -eq 1 ]]; then
 	printf '\n注意：.omp/trio/policy.txt 与上游存在差异，已保留本地版本（未覆盖）。\n'
 	printf '请人工核对；若为逃生舱方言，请在项目 README 或 board 标注原因。\n'
