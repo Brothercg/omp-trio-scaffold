@@ -147,6 +147,14 @@ else
 	FAIL=$((FAIL + 1))
 	missing=1
 fi
+if [[ -f "${PROJECT_DIR}/docs/REPLY-CONVENTIONS.md" ]]; then
+	green "  ✓ 回复规范已注入：docs/REPLY-CONVENTIONS.md"
+	PASS=$((PASS + 1))
+else
+	red "  ✗ 回复规范缺失：docs/REPLY-CONVENTIONS.md"
+	FAIL=$((FAIL + 1))
+	missing=1
+fi
 if [[ "$missing" -eq 1 ]]; then
 	red "  安装不完整，后续测试无意义。先运行：${SCAFFOLD_ROOT}/bin/init-agent.sh ${PROJECT_DIR}"
 	exit 1

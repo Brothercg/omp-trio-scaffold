@@ -200,6 +200,7 @@ printf '\n[3/6] 任务产物模板\n'
 for template in "${SCAFFOLD_ROOT}"/templates/*.md; do
 	create_file "${TARGET_DIR}/.omp/trio/templates/$(basename "$template")" "$template" "644" 1
 done
+create_file "${TARGET_DIR}/docs/REPLY-CONVENTIONS.md" "${SCAFFOLD_ROOT}/docs/REPLY-CONVENTIONS.md" "644" 1
 
 # ── 4. 进程内写门禁 hook + 会话名扩展 ─────────────────────────────────────
 

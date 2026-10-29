@@ -18,6 +18,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import * as os from "node:os";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import assert from "node:assert/strict";
@@ -160,13 +161,19 @@ check("AC-2b 三对 rules 逐字节相等（arch/dev/test）", () => {
 	}
 });
 
-check("AC-2c 追加位置在文件末尾（指针块落在最后非空行区）", () => {
+check("AC-2c 指针段与 TASK-008 自查清单同处回复格式节末尾", () => {
 	for (const file of [...RULES_PROFILES, ...RULES_OMP]) {
 		const lines = fs.readFileSync(file, "utf8").split("\n").filter(Boolean);
-		const tail = lines.slice(-6).join("\n");
+		const pointerAt = lines.findIndex((line) => line.includes("你的回复与产物引用 MUST 遵循"));
+		assert.ok(pointerAt >= 0, `${path.basename(file)} 缺指针段`);
+		const tail = lines.slice(pointerAt).join("\n");
 		assert.ok(
 			tail.includes("docs/REPLY-CONVENTIONS.md"),
 			`${path.basename(file)} 末尾未见指针块`,
+		);
+		assert.ok(
+			tail.includes("逐轮自查（输出前过一遍）："),
+			`${path.basename(file)} 指针段后未见 TASK-008 自查清单`,
 		);
 	}
 });
@@ -388,6 +395,82 @@ check("AC-10c 清扫 diff 无结论/断言/时间戳/状态值变更（改名 co
 				);
 			}
 		}
+	}
+});
+
+// ── TASK-008 AC-5：注入 byte-equal / 简报增补 / 升级覆盖 ──────────────────
+
+console.log("\n[AC-5 注入与简报增补（TASK-008）]");
+
+const INIT_AGENT = path.join(ROOT, "bin", "init-agent.sh");
+const INJECTED = path.join("docs", "REPLY-CONVENTIONS.md");
+const CHECKLIST = [
+	"逐轮自查（输出前过一遍）：",
+	"- [ ] 结论表开头：结论 / 状态 / 未完成项 / 产物 四字段",
+	"- [ ] 未完成与失败逐条解释：条目 / 期望·实际 / 复现 / 根因（[根因:实现|契约|用例|环境]）/ 解除条件",
+	"- [ ] 未闭环回复以分配块结尾：【任务】【必读】【指令】【交付】【纪律】【突出】【完成】七段逐字",
+	"- [ ] 结尾挂起清单（| 条目 | 等谁 | 解除条件 |），未清零项必须出现在结论表未完成项",
+	"- [ ] 产物引用一律完整项目相对路径",
+];
+
+function initTarget() {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "trio-t008-"));
+	execFileSync("git", ["init", "-q"], { cwd: dir });
+	return dir;
+}
+
+function runInit(dir) {
+	return execFileSync("bash", [INIT_AGENT, dir], { encoding: "utf8" });
+}
+
+check("AC-5a init 注入 docs/REPLY-CONVENTIONS.md 与源逐字节相等", () => {
+	const dir = initTarget();
+	try {
+		runInit(dir);
+		const dest = path.join(dir, INJECTED);
+		assert.ok(fs.existsSync(dest), "注入件缺失");
+		execFileSync("cmp", [CONVENTIONS, dest]);
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+check("AC-5b 三份简报含五行自查清单与 REPLY-CONVENTIONS 指针", () => {
+	for (const profile of RULES_PROFILES) {
+		const text = fs.readFileSync(profile, "utf8");
+		assert.ok(text.includes("`docs/REPLY-CONVENTIONS.md`"), `${profile} 缺指针`);
+		for (const line of CHECKLIST) {
+			assert.ok(text.includes(line), `${profile} 缺清单行：${line}`);
+		}
+	}
+});
+
+check("AC-5c 升级覆盖：注入件改旧后重跑 init 恢复源内容", () => {
+	const dir = initTarget();
+	try {
+		runInit(dir);
+		const dest = path.join(dir, INJECTED);
+		fs.writeFileSync(dest, "stale content\n");
+		const out = runInit(dir);
+		assert.match(out, /覆盖  docs\/REPLY-CONVENTIONS\.md/u);
+		execFileSync("cmp", [CONVENTIONS, dest]);
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+check("AC-5d 幂等：内容未变化时重跑 init 输出已是最新且不重写", () => {
+	const dir = initTarget();
+	try {
+		runInit(dir);
+		const dest = path.join(dir, INJECTED);
+		const before = fs.statSync(dest).mtimeMs;
+		const out = runInit(dir);
+		assert.match(out, /跳过  docs\/REPLY-CONVENTIONS\.md（已是最新）/u);
+		assert.equal(fs.statSync(dest).mtimeMs, before, "已是最新却发生重写");
+		execFileSync("cmp", [CONVENTIONS, dest]);
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
 	}
 });
 
