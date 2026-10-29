@@ -6,6 +6,38 @@
 格式：每版本一节，条目按「新增 / 修改 / 修复 / 弃用」分组，注明关联任务或 ADR。
 -->
 
+## v0.6.0 — 2026-10-29
+
+门禁加固与流程契约落地（TASK-007 / ADR-0012、ADR-0013；修复 BUG-1/2/3）。
+
+### 新增
+- `trio-guard` 的 `judgeBash` 改为 allow + deny 全矩阵判定；写目标按
+  `-t` / `--target-directory` / `--delete` / 选项值解析，覆盖 `cp`、
+  `install`、`ln`、`rsync` 及组合短选项。
+- `normalizeFsTarget` 按 realpath 归一：symlink 穿透、跨 worktree 出根
+  拒绝，`/tmp` 等系统路径不受管辖。
+- `pre-push` 证据绑定：报告基线必须等于待推 sha，或 delta 仅含文档
+  白名单；三执法面统一 `# gate-version` 自证，漂移 fail-closed。
+- `pre-commit` 写 marker，新增 `templates/post-commit`：无 marker 记
+  `bypass(no-marker)`，正常提交记 `ok`；pre-push 放行前展示 bypass 审计。
+- `bin/trio-mutation-check.mjs`：diff 变异质量门，退出码 0/1/2。
+- 流程契约：spec 模板可并行性/前置条件、board 熔断字段与根因列、
+  report 根因机检、RUNBOOK 攒批签字与时间预算。
+
+### 修复
+- BUG-1：`cp -t` / `cp --target-directory` / `install -t` / `ln -s -t` /
+  `rsync --delete` 的写方向反转，写目标不再误取源路径。
+- BUG-2：`gate-version` 改为严格唯一整数行，guard / pre-commit / pre-push
+  三面同判；`0001` 按数值自证等价放行，重复行仍拒绝。
+- BUG-3：非法 `TRIO_ROLE` 值（拼写错误 / 空格 / 空串）fail-closed；
+  未设置仍保留无身份逃生舱并附醒目提示。
+- AC-13：回收 TASK-007 临时写通道，`policy.txt` 删除窗口块并恢复四条
+  `deny`，审计记录留档。
+
+### 测试
+- 10 个测试套件 405 项 0 失败；QA 第 3 轮复测 BUG-1/2/3 全通过，
+  第 4 轮 AC-13 回收核验 7/7 通过。
+
 ## v0.5.1 — 2026-10-28
 
 策略生效语义与双执法面同裁决（TASK-006 / ADR-0011；修复 BUG-1）。
