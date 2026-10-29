@@ -13,17 +13,17 @@
 
 | 字段 | 值 |
 |---|---|
-| 当前状态 | `waiting_user`（模板落盘走用户 drop 通道，见 B-1） |
+| 当前状态 | `waiting_user`（AC-1 冒烟收口完成，待用户终验签字） |
 | 最后推进人 | `ARCH` |
-| 最后更新 | `2026-10-27 19:49` |
+| 最后更新 | `2026-10-29 14:14` |
 
 ### 处置流程
 
 | 阶段 | 状态 | 备注 |
 |---|---|---|
 | ① grill 对齐（8 分支） | done | `backflow-20261027` 全树拍板 |
-| ② ARCH 落盘 | 部分 done | spec / ADR / README §15 已落；模板待用户 drop（B-1 缓存盲区） |
-| ③ AC-1 注入冒烟 | 待办 | 模板落盘后 init 冒烟收口 |
+| ② ARCH 落盘 | done | spec / ADR / README §15 + 回流卡模板均已落（模板经用户 drop：`c3c7ca6`） |
+| ③ AC-1 注入冒烟 | done | 2026-10-29 14:14 ARCH 冒烟收口：`init-agent.sh` exit=0，注入件与源逐字节相等 |
 
 ## 3. 验收准则进度
 
@@ -31,7 +31,7 @@
 
 | AC | 契约 | 实现 | 验证 | 状态 |
 |---|---|---|---|---|
-| AC-1 模板注入 | ☑ | ☐ | ☐ | 待模板落盘 + init 冒烟 |
+| AC-1 模板注入 | ☑ | ☑ | ☑ | 2026-10-29 冒烟收口（init exit=0，`.omp/trio/templates/backflow.template.md` 与源逐字节相等） |
 | AC-2 卡片完备 | ☑ | ☑ | ☐ | 模板七段 + 自检清单内建；实卡验证属使用期 |
 | AC-3 自豁免 | ☑ | ☑ | ☑ | 模板头 + spec §2.4 + ADR-0010 三方声明 |
 | AC-4 双轨独立 | ☑ | ☑ | ☑ | spec §2.5；模板零 feedback 落位 |
@@ -41,7 +41,7 @@
 
 | 编号 | 类型 | 描述 | 待谁 |
 |---|---|---|---|
-| B-1 | 机制 finding | 门禁策略进程内缓存（`trio-guard.ts` `cachedRules` 首查后不重读）：本会话 hook 实例早于 `269c974`（ADR-0009 放权 `templates/*.template.md`），ARCH 写模板被误拦。fail-closed 方向安全（旧缓存只少放行）；新会话无此问题。处置：模板走用户 drop；缓存失效策略（每次读 / TTL）留后续任务议 | 用户（落盘） |
+| B-1 | 机制 finding | 门禁策略进程内缓存（`trio-guard.ts` `cachedRules` 首查后不重读）：本会话 hook 实例早于 `269c974`（ADR-0009 放权 `templates/*.template.md`），ARCH 写模板被误拦。fail-closed 方向安全（旧缓存只少放行）；新会话无此问题。处置：模板走用户 drop；缓存失效策略（每次读 / TTL）留后续任务议——已由 TASK-006「即时生效」（mtime+digest 每判重读）实现 | 已收口（模板 drop `c3c7ca6`；缓存策略由 TASK-006 销） |
 
 ## 5. 决策记录
 
@@ -66,5 +66,6 @@ cp /tmp/backflow.template.md /home/cg/projects/omp-trio-scaffold/templates/backf
 
 | 条目 | 等谁 | 解除条件 |
 |---|---|---|
-| 模板落盘 + AC-1 注入冒烟 | 用户 | drop 回执「done（模板已落）」→ ARCH 冒烟 |
-| 门禁策略缓存失效策略（B-1 遗留） | 后续任务 | 立项议（每次读 / TTL / 显式失效） |
+| ~~模板落盘 + AC-1 注入冒烟~~ | — | 已完成：模板 drop `c3c7ca6` + ARCH 冒烟收口 2026-10-29 14:14 |
+| ~~门禁策略缓存失效策略（B-1 遗留）~~ | — | 已由 TASK-006「即时生效」解决（mtime+digest 每判重读），销项 |
+| 用户终验签字 | 用户 | 签字 → `user_signed`（本任务真闭环） |
