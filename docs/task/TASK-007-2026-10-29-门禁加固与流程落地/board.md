@@ -88,3 +88,10 @@
 | ~~AC-1..12 验证~~ | QA | 已完成：第 3 轮复测全绿（`qa-20261029-1341-report-门禁加固-第3轮.md`）+ 第 4 轮 AC-13 收口全绿；熔断计数 0/3 |
 | ~~窗口回收（AC-13）~~ | 用户 | 已完成：无角色执行者 commit 70f3938 回收窗口块 + 复原 4 deny；QA 第 4 轮核验通过 |
 | omp 冒烟环境（`authentication_error` 401） | 用户 | 修复模型凭据后重跑 `bin/trio-selftest.sh` 冒烟段（release note §7） |
+
+## 8. 发布记录
+
+- `2026-10-29 14:03`：DEV 发布 `v0.6.0` —— `main 296ae98..e289def`；
+  tag object `78e19a8`（peeled `e289def`）；远端 main / tag 已落地。
+  发布记录 `dev-20261029-1403-release.md`；pre-push path A 自检通过
+  （QA 第 4 轮报告基线 `70f3938`，release delta 仅文档）。
