@@ -2,6 +2,8 @@
 
 <!--
 落位：docs/task/TASK-007-2026-10-29-门禁加固与流程落地/arch-20261029-1420-prompt-profiles同步.md
+【已作废】本单已整体并入 TASK-008 执行提示词（docs/task/TASK-008-2026-10-29-回复结构内建/arch-20261029-1723-prompt-无角色执行.md），
+以合并单为准执行，本单不再单独执行。
 用法：用户开一个不设置 TRIO_ROLE 的 omp 窗口，整段粘贴以下分隔线内内容。
 依据：ADR-0013 §5「文本同步待办」——profiles 随公共维护区一次同步。
 注意：ADR-0013 §5 写作 profiles/qa.rules.md，实际文件名为 profiles/test.rules.md（QA 简报），同一件。
