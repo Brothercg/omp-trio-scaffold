@@ -8,6 +8,7 @@
 ```bash
 omp --version            # omp 必须在 PATH
 command -v tmux          # 仅方式 B 需要，方式 A 不依赖
+trio-install --check     # 日常自检：入口软链与仓库位置是否有效
 trio-selftest --fast     # 在项目根执行，确认门禁已装好
 ```
 
@@ -263,6 +264,33 @@ cp .omp/trio/templates/board.template.md docs/task/2026-10-25-登录改造/board
   hook 管辖，是全链兜底。
 
 一句话记忆：**qa 投否决票，arch 发通行证，dev 踩油门，用户握方向盘**。
+
+### 4.6 流程契约（ADR-0013）
+
+#### 4.6.1 熔断口径
+
+- **仅实现缺陷轮计数**：QA 判「未通过」→ DEV 修 → QA 复测仍未通过 = 1 轮，前提是
+  QA 报告该行根因分类为 `[根因:实现]`。累计 3 轮停手转 `blocked`。
+- **契约 / 用例 / 环境轮不计数**：契约缺陷 → `contract-gap` 交 ARCH；QA 用例错 → 修用例；
+  环境问题 → 修环境。三者 MUST 在 1 轮内转 verdict / `contract-gap` / 用例修正，
+  转不动即 `blocked`（比烧满 3 轮更快暴露）。
+- QA 报告「未通过」行未标根因分类 → `bin/trio-check-report.mjs` T11 判违规，
+  不计轮次（无分类不计轮）。
+
+#### 4.6.2 HITL 攒批签字（签字绑 commit 链）
+
+- 多个任务到达 `qa_passed` 后**攒批**到一次终验会话统一签字，不逐任务打断用户。
+- 签字记录 MUST 绑定 commit 链：记下当时的 `HEAD` / 报告基线 commit；
+  ADR-0012 §3.3 的「报告基线 == 待推 sha」保证签字对象与推送代码一致。
+- 攒批期内新增提交 → 旧签字对新增部分失效，触发增量复验（基线 ≠ 待推即拒绝推送，
+  除非 delta 仅文档路径）。
+
+#### 4.6.3 spec 时间预算
+
+- 单任务 spec ≤ 1 轮会话；超时即降级：**先实现非契约面**（不依赖契约裁决的部分），
+  契约面挂 `waiting_user` / `contract-gap`，不得用「边写边定」拖住流水。
+- 契约只锁接口签名 + AC + 错误契约；实现细节明文不锁（spec §7「范围外」），
+  DEV 自主决定内部实现。
 
 ---
 
