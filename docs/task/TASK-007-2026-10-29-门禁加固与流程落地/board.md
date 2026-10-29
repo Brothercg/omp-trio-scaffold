@@ -80,6 +80,7 @@
 | 条目 | 等谁 | 解除条件 |
 |---|---|---|
 | ~~无角色窗口执行（B-1）~~ | 用户 | 已完成：`dev-20261029-1158-release.md` |
-| TASK-006 实现 | 同类提示词 | ARCH 出提示词后同模式执行 |
-| AC-1..13 验证 | QA | 对抗全绿 + selftest 回归绿（状态已推 `testing`） |
-| 窗口回收（AC-13） | 用户 | TASK-006+007 双 user_signed 后删窗口块并恢复四条 deny |
+| ~~TASK-006 实现~~ | — | 已完成归档：`user_signed` 2026-10-28 23:18，v0.5.1 已发布（旧挂起项作废） |
+| AC-1..12 验证 | QA | 对抗全绿 + selftest 回归绿（状态已推 `testing`） |
+| 窗口回收（AC-13） | 用户 | TASK-007 `user_signed` 后（TASK-006 已签）删窗口块并恢复四条 deny |
+| omp 冒烟环境（`authentication_error` 401） | 用户 | 修复模型凭据后重跑 `bin/trio-selftest.sh` 冒烟段（release note §7） |
