@@ -93,5 +93,8 @@
 
 - `2026-10-29 14:03`：DEV 发布 `v0.6.0` —— `main 296ae98..e289def`；
   tag object `78e19a8`（peeled `e289def`）；远端 main / tag 已落地。
-  发布记录 `dev-20261029-1403-release.md`；pre-push path A 自检通过
+  发布记录 `dev-20261029-1403-release-v0.6.0.md`；pre-push path A 自检通过
   （QA 第 4 轮报告基线 `70f3938`，release delta 仅文档）。
+- `2026-10-29 14:33`：发布说明按提示词补 `-v0.6.0` 后缀并补证据指针；
+  全量回归 10 套件 405/0；profiles 三对规则同步（`683a10e`）与 ARCH
+  提示词（`821a24a`）属 tag 后文档同步，随 main 推送。
