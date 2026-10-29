@@ -6,6 +6,40 @@
 格式：每版本一节，条目按「新增 / 修改 / 修复 / 弃用」分组，注明关联任务或 ADR。
 -->
 
+## v0.7.0 — 2026-10-29
+
+回复结构内建（TASK-008）+ profiles ADR-0013 口径同步。
+
+### 新增
+- `init-agent.sh` 向下游注入 `docs/REPLY-CONVENTIONS.md`
+  （缺失新建 / 内容不同覆盖 / 相同跳过），回复结构从「悬空指针」
+  变为「随部署内建」。
+- `trio-selftest.sh` `[1/8]` 新增「回复规范已注入」检出项；缺失即
+  FAIL 并计入安装不完整。
+- 三份角色简报「回复格式」节新增逐轮自查五行清单，`docs/REPLY-CONVENTIONS.md`
+  指针命中注入文档。
+- `tests/trio-reply-conventions.test.mjs` 新增注入 byte-equal、简报清单、
+  升级覆盖、幂等四条行为级断言。
+- TASK-008 契约/裁决/QA 报告归档（spec v2、verdict-1、QA 第 1/2 轮）。
+
+### 修改
+- `profiles/{arch,dev,test}.rules.md` 与 `.omp/trio/*.rules.md` 三对同步
+  ADR-0013 口径（`683a10e`）：熔断计数仅含 `[根因:实现]` 轮；
+  test 简报验收自检增根因分类强制项。
+
+### 修复
+- `init-agent.sh` 单件注入失败改为计入 `FAILED`、打印失败汇总与路径清单、
+  整体 `exit 1`，过程不中断；不再「半部署报成功」（verdict-1）。
+- 只读文件但父目录可写仍走成功覆盖；仅父目录不可写时判失败（AC-2f）。
+
+### 测试
+- 10 个测试套件 411 项 0 失败；`trio-selftest.sh` 27/27 通过
+  （`[6/8]`/`[7/8]` omp 冒烟因 `authentication_error` 跳过）。
+
+### 升级
+- 下游重跑 `bin/init-agent.sh` 即获得 `docs/REPLY-CONVENTIONS.md` 注入；
+  重启 omp 窗口加载新简报。
+
 ## v0.6.0 — 2026-10-29
 
 门禁加固与流程契约落地（TASK-007 / ADR-0012、ADR-0013；修复 BUG-1/2/3）。
