@@ -124,7 +124,6 @@ allow arch bin/init-agent.sh
 # ↑↑↑ END TASK-007 临时写通道
 # gate-version: 1
 
-# 窗口生效期：以下四行按附录 A 注释停用（deny 优先会压过上方 allow 窗口）。
 # deny arch .omp/hooks/**
 deny qa .omp/hooks/**
 # deny arch bin/**
