@@ -4,6 +4,8 @@
 !.omp/trio/
 !.omp/hooks/
 !.omp/extensions/
+# 注入衍生物：init 拷贝件，单一真值源是 templates/（粘贴件 B ⑨ 语义）
+.omp/trio/templates/
 
 # ── omp 运行时产物 ─────────────────────────────────────────────────────────
 .omp/agent/
