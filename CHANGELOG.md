@@ -6,6 +6,24 @@
 格式：每版本一节，条目按「新增 / 修改 / 修复 / 弃用」分组，注明关联任务或 ADR。
 -->
 
+## v0.9.4 — 2026-10-31
+
+TASK-012 后续：下游 tooling 布局与 pointer 安装源的断言兼容（patch）。
+
+### 修复
+- `tests/trio-guard.test.mjs`：bin 保护路径按布局解析（`tooling/bin` /
+  `bin`）；回收断言接受 `deny * (tooling/)bin/**`；fail-closed 目标随布局切换。
+- `tests/trio-init-layout.test.mjs`：bin 布局按真实安装源 `binHookSrc` 比对，
+  `templates/post-commit` 缺失时回退 `tooling/hooks/post-commit`；检测
+  `templates/pre-commit` 为下游 pointer 时跳过临时 bin 自检子用例。
+- `tests/trio-align.test.mjs`：根/工具/校验器改经 `_layout` 的
+  `projectRoot()` / `toolPath()`，不再写死 `ROOT/..` 与 `bin/`。
+
+### 测试
+- 上游 11 套件 450 项、`trio-selftest.sh --fast` 28 项全绿。
+- 下游 `factor_synthesis` 重装后 `trio-selftest.sh --fast` 22 项全绿
+  （`trio-init-layout` 25 项，pointer 源跳过 1 个 bin 子用例）。
+
 ## v0.9.3 — 2026-10-30
 
 TASK-012：tooling 布局安装面渲染与测试面自适应（patch）。

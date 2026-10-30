@@ -1,4 +1,4 @@
-# 任务看板：tooling 布局安装模板与测试面补齐（v0.9.3）
+# 任务看板：tooling 布局安装模板与测试面补齐（v0.9.3/v0.9.4）
 
 ## 1. 标识
 
@@ -8,21 +8,21 @@
 | 任务目录 | `docs/task/TASK-012-2026-10-30-安装模板与测试面/` |
 | 工作树 / 分支 | 主工作树 / `main` |
 | 起始日期 | `2026-10-30` |
-| qa_report | `docs/task/TASK-012-2026-10-30-安装模板与测试面/qa-20261030-2258-report-安装模板与测试面.md` |
+| qa_report | `docs/task/TASK-012-2026-10-30-安装模板与测试面/qa-20261031-0049-report-v0.9.4.md` |
 | release_gate | `strict` |
-| 远端 main hash | `c0f4e440504b5dc8e86b5c6b9a1b3185a183c474` |
-| 远端 tag object | `b5ef707bdb0e4e11e00133dc5f04ed8472a9dd99`（peeled `12df23eb99fe4cd1258fbc4c6caeb667d38a3681`） |
+| 远端 main hash | `c0f4e440504b5dc8e86b5c6b9a1b3185a183c474`（v0.9.3 发布推送点） |
+| 远端 tag object | `b5ef707bdb0e4e11e00133dc5f04ed8472a9dd99`（v0.9.3；peeled `12df23eb99fe4cd1258fbc4c6caeb667d38a3681`） |
 
 ## 2. 状态
 
 | 字段 | 值 |
 |---|---|
 | 当前状态 | `user_signed` |
-| 最后推进人 | `DEV`（发布 v0.9.3） |
-| 最后更新 | `2026-10-30 23:24` |
+| 最后推进人 | `DEV`（发布 v0.9.4） |
+| 最后更新 | `2026-10-31 00:50` |
 
 > 终验依据：用户终验签字 2026-10-30 23:05；QA 第 1 轮全绿 + SKIP 挂起已现记。
-> v0.9.3 已发布（release commit `12df23e`，tag object `b5ef707`，main `c0f4e44`）；下游 AC-10 待复跑。
+> v0.9.3 已发布；v0.9.4 下游复跑 `trio-selftest --fast` 22/0，AC-10 解除。
 
 ### 处置流程
 
@@ -52,7 +52,7 @@
 | AC-7 测试根解析 | `☑` | `☑` | `☑` | 待 QA 复测 |
 | AC-8 模板两层校验 | `☑` | `☑` | `☑` | 待 QA 复测 |
 | AC-9 部署面 | `☑` | `☑` | `☑` | 待 QA 复测 |
-| AC-10 下游重装验收 | `☑` | `◐` | `☑` | 等价夹具通过；下游脚本停留 v0.9.2（实测无 render_payload/resolve_src）→ SKIP 挂起，修复发布后由下游复跑（spec §7;board §7 第 1 行） |
+| AC-10 下游重装验收 | `☑` | `☑` | `☑` | v0.9.4 下游 `factor_synthesis` 重装后 `trio-selftest --fast` 22/0；`trio-init-layout` 25 项，pointer 源跳过 1 个 bin 子用例 |
 
 ## 4. 阻塞与待裁决
 
@@ -105,9 +105,10 @@ selftest 28 项、tooling 安装面 6 套件全绿。交 QA 按 `arch-20261030-2
 
 | 条目 | 解除条件 | 触发者 | 解除后动作 |
 |---|---|---|---|
-| 下游 `--force` 重装 + selftest 全绿（AC-10） | v0.9.3 修复落地 | 用户/下游 | 复跑 `init-agent.sh . --force` + `trio-selftest.sh --fast`，回填本板 |
-| 下游 19 条「上游 ⑩ 依赖」SKIP 中模板/测试面项 | 同上 | 下游 QA | 转实跑并回填下游板 §7 |
+| ~~下游 `--force` 重装 + selftest 全绿（AC-10）~~ | 已解除（v0.9.4；下游 22/0） | 用户/下游 | 已复跑并回填 |
+| ~~下游 19 条「上游 ⑩ 依赖」SKIP 中模板/测试面项~~ | 已按 v0.9.4 口径解除：selftest 22/0；余 3 个 scaffold-only 直接跑不属安装仓验收面 | 下游 QA | 不再作为挂起项 |
 | ~~v0.9.3 发布（tag/push）~~ | — | 已完成（release commit `12df23e`；tag `b5ef707`；main `c0f4e44`） | — |
+| v0.9.4 发布（tag/push） | QA 复跑通过 | DEV 窗口 | 按发布规则执行 |
 | TASK-013 提案（policy glob 布局化） | 用户批准立项 | ARCH | 补写权面契约（spec §8 遗留） |
 
 `user_signed` + 挂起清单清零 = 真闭环；解除条件成熟 → 触发者集中补测一轮。
