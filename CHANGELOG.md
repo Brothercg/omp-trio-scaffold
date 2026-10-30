@@ -6,6 +6,22 @@
 格式：每版本一节，条目按「新增 / 修改 / 修复 / 弃用」分组，注明关联任务或 ADR。
 -->
 
+## v0.9.1 — 2026-10-30
+
+TASK-010：上游反馈 ⑫，`init-agent.sh` 根自定位补齐（patch）。
+
+### 修复
+- `bin/init-agent.sh` 复用 `trio-align.sh` 的 `resolve_root`：脚本位于
+  `<root>/bin/` 或 `<root>/tooling/bin/` 时，均按 `.omp/trio/policy.txt`
+  向上探测物理根；定位失败 error + exit 1。修复落 `tooling/bin/` 后源目录被算成
+  `tooling/`、`--dry-run` 误报「缺少 templates/pre-commit」的问题。
+- 不改 `--layout` / `--dry-run` 语义；不迁移既有布局。
+
+### 测试
+- `tests/trio-init-layout.test.mjs` 新增 AC-8c：脚本置于 `<root>/tooling/bin/`
+  后 `--dry-run` exit 0 且不报缺少 templates；套件 15 → 16 项。
+- 全量 11 个套件 440 项通过 / 0 失败；`trio-selftest.sh` 28 项通过 / 0 失败。
+
 ## v0.9.0 — 2026-10-30
 
 TASK-009：安装布局无关化（⑩）与报告矩阵机检 T12（⑪）。
