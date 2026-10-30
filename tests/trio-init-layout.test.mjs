@@ -357,6 +357,28 @@ check("AC-8 align 无 policy 目录 → exit 1 + 无法定位仓库根", () => {
 	}
 });
 
+check("AC-8c init-agent 在 tooling/bin/ 自定位根（反馈 ⑫）", () => {
+	const srcRoot = makeSourceRoot();
+	const target = newRepo();
+	try {
+		fs.mkdirSync(path.join(srcRoot, "templates"), { recursive: true });
+		fs.copyFileSync(path.join(TEMPLATES, "pre-commit"), path.join(srcRoot, "templates/pre-commit"));
+		const dir = path.join(srcRoot, "tooling/bin");
+		fs.mkdirSync(dir, { recursive: true });
+		fs.copyFileSync(INIT, path.join(dir, "init-agent.sh"));
+		const r = spawnSync("bash", [path.join(dir, "init-agent.sh"), target, "--dry-run"], {
+			encoding: "utf8",
+			env: ENV,
+		});
+		assert.equal(r.status, 0, `${r.stdout}\n${r.stderr}`);
+		assert.ok(!r.stderr.includes("缺少 templates/pre-commit"), `根误判：${r.stderr}`);
+		assert.match(r.stdout, /干跑：/u);
+	} finally {
+		fs.rmSync(srcRoot, { recursive: true, force: true });
+		fs.rmSync(target, { recursive: true, force: true });
+	}
+});
+
 function pruneSuites(dir, suiteDirRel) {
 	for (const rel of ["tests", "tooling/tests"]) {
 		const relDir = path.join(dir, rel);

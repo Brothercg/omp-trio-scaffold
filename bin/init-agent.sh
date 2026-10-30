@@ -33,7 +33,23 @@ set -euo pipefail
 # 直接用 dirname $BASH_SOURCE 会把 SCAFFOLD_ROOT 算成软链所在目录的上级。
 readonly SELF_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 readonly SELF_DIR="$(dirname "$SELF_PATH")"
-readonly SCAFFOLD_ROOT="$(cd "${SELF_DIR}/.." && pwd)"
+
+# 根自定位（ADR-0015 §2.4）：脚本可能位于 <root>/bin/ 或 <root>/tooling/bin/。
+# 依次探测 SELF_DIR/.. 与 SELF_DIR/../..，取第一个含 policy.txt 的物理路径。
+resolve_root() {
+	local self_dir="$1" candidate
+	for candidate in "${self_dir}/.." "${self_dir}/../.."; do
+		if [[ -f "${candidate}/.omp/trio/policy.txt" ]]; then
+			(cd "$candidate" && pwd -P)
+			return 0
+		fi
+	done
+	printf '无法定位仓库根：%s 向上两级未见 .omp/trio/policy.txt\n' "$self_dir" >&2
+	return 1
+}
+
+SCAFFOLD_ROOT="$(resolve_root "$SELF_DIR")" || exit 1
+readonly SCAFFOLD_ROOT
 
 # ── 参数解析 ───────────────────────────────────────────────────────────────
 
