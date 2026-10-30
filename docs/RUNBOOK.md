@@ -8,7 +8,7 @@
 ```bash
 omp --version            # omp 必须在 PATH
 command -v tmux          # 仅方式 B 需要，方式 A 不依赖
-trio-install --check     # 日常自检：入口软链与仓库位置是否有效
+~/projects/omp-trio-scaffold/bin/trio-install.sh --check   # 入口软链自检（trio-install 不发布为 PATH 命令，走仓库内脚本）
 trio-selftest --fast     # 在项目根执行，确认门禁已装好
 ```
 
@@ -300,7 +300,7 @@ cp .omp/trio/templates/board.template.md docs/task/2026-10-25-登录改造/board
 
 | 层 | 内容 | 升版动作 |
 |---|---|---|
-| 执行件（软链） | `trio-init` / `trio-start` / `trio-tmux` / `trio-selftest` / `trio-align` / `trio-install` 是指向本仓 `bin/*.sh` 的软链 | 本仓升版即生效，**下游零操作** |
+| 执行件（软链） | `trio-init` / `trio-start` / `trio-tmux` / `trio-selftest` 是指向本仓 `bin/*.sh` 的软链；`trio-install` / `trio-align` **不发布为 PATH 命令**，从本仓内 `bin/*.sh` 调用 | 本仓升版即生效，**下游零操作** |
 | 注入件（拷贝） | `.omp/**`、`docs/REPLY-CONVENTIONS.md`、`bin/trio-check-report.mjs`、`bin/trio-policy-eval.mjs`、`tests/*.test.mjs`、`.git/hooks/{pre-commit,pre-push,post-commit}` | 重跑 `trio-init`（覆盖语义见 §5.1） |
 | 进程内件 | `.omp/hooks/**`、`.omp/extensions/**` 在 omp 启动时加载 | 重跑后**重启所有窗口** |
 
@@ -317,7 +317,7 @@ cp .omp/trio/templates/board.template.md docs/task/2026-10-25-登录改造/board
 ```bash
 # ① 本仓升版（软链命令随即指向新版）
 cd ~/projects/omp-trio-scaffold && git fetch --tags && git checkout v0.7.0
-trio-install --check            # 软链与仓库位置有效
+bin/trio-install.sh --check     # 软链与仓库位置有效（该脚本不发布为 PATH 命令）
 
 # ② 下游项目根，重跑注入
 #    注意：必须在【不设 TRIO_ROLE】的窗口执行 ——
@@ -330,7 +330,7 @@ trio-init --force               # 需要跟进 rules / tests 新版时才加
 
 # ④ 自检
 trio-selftest --fast            # 全绿再干活
-trio-align --check              # 布局与 policy 零差异（exit 0）
+~/projects/omp-trio-scaffold/bin/trio-align.sh --check   # 布局与 policy 零差异（exit 0）
 ```
 
 > 三角色会话**进行中**不要重跑 `trio-init`：注入件改写会与进行中的提交/门禁交错。
