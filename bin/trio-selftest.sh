@@ -20,7 +20,23 @@ set -uo pipefail
 # 直接用 dirname $BASH_SOURCE 会把 SCAFFOLD_ROOT 算成软链所在目录的上级。
 readonly SELF_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 readonly SELF_DIR="$(dirname "$SELF_PATH")"
-readonly SCAFFOLD_ROOT="$(cd "${SELF_DIR}/.." && pwd)"
+
+# 根自定位（ADR-0015 §2.4）：脚本可能位于 <root>/bin/ 或 <root>/tooling/bin/。
+# 依次探测 SELF_DIR/.. 与 SELF_DIR/../..，取第一个含 policy.txt 的物理路径。
+resolve_root() {
+	local self_dir="$1" candidate
+	for candidate in "${self_dir}/.." "${self_dir}/../.."; do
+		if [[ -f "${candidate}/.omp/trio/policy.txt" ]]; then
+			(cd "$candidate" && pwd -P)
+			return 0
+		fi
+	done
+	printf '无法定位仓库根：%s 向上两级未见 .omp/trio/policy.txt\n' "$self_dir" >&2
+	return 1
+}
+
+SCAFFOLD_ROOT="$(resolve_root "$SELF_DIR")" || exit 1
+readonly SCAFFOLD_ROOT
 
 PROJECT_DIR=""
 FAST=0
@@ -97,6 +113,9 @@ HOOK="${PROJECT_DIR}/.omp/hooks/pre/trio-guard.ts"
 POLICY="${PROJECT_DIR}/.omp/trio/policy.txt"
 PRECOMMIT="${PROJECT_DIR}/.git/hooks/pre-commit"
 VALIDATOR="${PROJECT_DIR}/bin/trio-check-report.mjs"
+if [[ ! -f "$VALIDATOR" ]]; then
+	VALIDATOR="${PROJECT_DIR}/tooling/bin/trio-check-report.mjs"
+fi
 EXTENSION="${PROJECT_DIR}/.omp/extensions/trio-session-name.ts"
 
 TASK_DIR="${PROJECT_DIR}/docs/task/TRIO-SELFTEST"
@@ -163,17 +182,28 @@ fi
 # 软链发布自检。历史缺陷：用 dirname $BASH_SOURCE 推导根目录，
 # 脚本被 symlink 到 ~/.local/bin 后 SCAFFOLD_ROOT 会算成 ~/.local，
 # 表现为「脚手架不完整」。trio-install.sh --check 只读，可安全用作探针。
-LINK_PROBE="$(mktemp -d)"
-ln -sfn "${SCAFFOLD_ROOT}/bin/trio-install.sh" "${LINK_PROBE}/trio-install"
-LINK_OUT="$("${LINK_PROBE}/trio-install" --check --prefix "${LINK_PROBE}/bin" 2>&1 || true)"
-if printf '%s' "$LINK_OUT" | grep -q '脚手架不完整'; then
-	red "  ✗ 软链发布失效：通过 symlink 调用时 SCAFFOLD_ROOT 解析错误"
-	FAIL=$((FAIL + 1))
+INSTALL_SH=""
+for candidate in "${SCAFFOLD_ROOT}/bin/trio-install.sh" "${SCAFFOLD_ROOT}/tooling/bin/trio-install.sh"; do
+	if [[ -f "$candidate" ]]; then
+		INSTALL_SH="$candidate"
+		break
+	fi
+done
+if [[ -z "$INSTALL_SH" ]]; then
+	green "  跳过：未找到 trio-install.sh（本布局无该件）"
 else
-	green "  ✓ 软链发布可用（symlink 调用时根目录解析正确）"
-	PASS=$((PASS + 1))
+	LINK_PROBE="$(mktemp -d)"
+	ln -sfn "$INSTALL_SH" "${LINK_PROBE}/trio-install"
+	LINK_OUT="$("${LINK_PROBE}/trio-install" --check --prefix "${LINK_PROBE}/bin" 2>&1 || true)"
+	if printf '%s' "$LINK_OUT" | grep -q '脚手架不完整'; then
+		red "  ✗ 软链发布失效：通过 symlink 调用时 SCAFFOLD_ROOT 解析错误"
+		FAIL=$((FAIL + 1))
+	else
+		green "  ✓ 软链发布可用（symlink 调用时根目录解析正确）"
+		PASS=$((PASS + 1))
+	fi
+	rm -rf "$LINK_PROBE"
 fi
-rm -rf "$LINK_PROBE"
 
 # ── 1. 预置测试夹具 ───────────────────────────────────────────────────────
 
@@ -194,9 +224,12 @@ if ! command -v bun >/dev/null 2>&1; then
 else
 	shopt -s nullglob
 	suites=("${SCAFFOLD_ROOT}"/tests/*.test.mjs)
+	if [[ ${#suites[@]} -eq 0 ]]; then
+		suites=("${SCAFFOLD_ROOT}"/tooling/tests/*.test.mjs)
+	fi
 	shopt -u nullglob
 	if [[ ${#suites[@]} -eq 0 ]]; then
-		red "  ✗ 未找到任何测试套件：${SCAFFOLD_ROOT}/tests/*.test.mjs"
+		red "  ✗ 未找到任何测试套件：${SCAFFOLD_ROOT}/tests/*.test.mjs 或 ${SCAFFOLD_ROOT}/tooling/tests/*.test.mjs"
 		FAIL=$((FAIL + 1))
 	else
 		for file in "${suites[@]}"; do
@@ -204,7 +237,7 @@ else
 			name="${name%.test.mjs}"
 			if bun "$file" >/tmp/trio-unit-out.$$ 2>&1; then
 				summary="$(grep -oE '通过 [0-9]+ 项|[0-9]+ passed' /tmp/trio-unit-out.$$ | tail -1)"
-				green "  ✓ ${name} 测试通过（${summary:-完成}）"
+				green "  ✓ ${name} 测试通过（${file#"${SCAFFOLD_ROOT}"/}；${summary:-完成}）"
 				PASS=$((PASS + 1))
 			else
 				red "  ✗ ${name} 测试失败："
@@ -277,6 +310,12 @@ cat >"$REPORT_OK" <<'REPORT'
 | 用例 | 位置 | 结论 | 说明 |
 |---|---|---|---|
 | AC-1 | — | 通过 | — |
+
+## AC → 用例覆盖矩阵
+
+| AC | 用例编号 | 备注 |
+|---|---|---|
+| AC-1 | AC-1 | — |
 
 ## 汇总
 
