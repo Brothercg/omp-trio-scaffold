@@ -17,7 +17,7 @@
 |---|---|
 | 当前状态 | `user_signed` |
 | 最后推进人 | `ARCH` |
-| 最后更新 | `2026-10-30 18:05` |
+| 最后更新 | `2026-10-30 18:16` |
 
 > 下游 `factor_synthesis` 反馈 ⑫：`init-agent.sh` 落 `tooling/bin/` 后把源目录算成
 > `tooling/`，`--dry-run` 报「缺少 templates/pre-commit」。用户直派维护补丁：
@@ -46,3 +46,9 @@
   `--dry-run` exit 1，stderr「脚手架不完整，缺少 templates/pre-commit（源目录：…/tooling）」。
 - 新版：同一夹具 exit 0，stdout「布局：bin（auto）」「干跑：将新建 15 项…」。
 - 全量：11 个套件 440 项通过 / 0 失败；`trio-selftest.sh` 28 项通过 / 0 失败。
+
+## 6. 发布记录
+
+- `2026-10-30 18:09`：DEV 发布 `v0.9.1` —— `main 0cb7565..b3a7b85`；
+  release commit `b3a7b85`；tag `v0.9.1` object `bfa137f`（peeled `b3a7b85`）；
+  pre-push 走 `release_gate=exempt(maintenance)` + `V-12`，审计无 bypass。
