@@ -10,8 +10,8 @@
 | 起始日期 | `2026-10-30` |
 | qa_report | `docs/task/TASK-012-2026-10-30-安装模板与测试面/qa-20261031-0049-report-v0.9.4.md` |
 | release_gate | `strict` |
-| 远端 main hash | `c0f4e440504b5dc8e86b5c6b9a1b3185a183c474`（v0.9.3 发布推送点） |
-| 远端 tag object | `b5ef707bdb0e4e11e00133dc5f04ed8472a9dd99`（v0.9.3；peeled `12df23eb99fe4cd1258fbc4c6caeb667d38a3681`） |
+| 远端 main hash | `23957571f673085b7233a0180e9b7f8fb85163de`（v0.9.4 发布推送点） |
+| 远端 tag object | `1a478c839070f19bb9115cf904ea6a956f60e3b4`（v0.9.4；peeled `23957571f673085b7233a0180e9b7f8fb85163de`） |
 
 ## 2. 状态
 
@@ -108,7 +108,7 @@ selftest 28 项、tooling 安装面 6 套件全绿。交 QA 按 `arch-20261030-2
 | ~~下游 `--force` 重装 + selftest 全绿（AC-10）~~ | 已解除（v0.9.4；下游 22/0） | 用户/下游 | 已复跑并回填 |
 | ~~下游 19 条「上游 ⑩ 依赖」SKIP 中模板/测试面项~~ | 已按 v0.9.4 口径解除：selftest 22/0；余 3 个 scaffold-only 直接跑不属安装仓验收面 | 下游 QA | 不再作为挂起项 |
 | ~~v0.9.3 发布（tag/push）~~ | — | 已完成（release commit `12df23e`；tag `b5ef707`；main `c0f4e44`） | — |
-| v0.9.4 发布（tag/push） | QA 复跑通过 | DEV 窗口 | 按发布规则执行 |
+| ~~v0.9.4 发布（tag/push）~~ | — | 已完成（release commit `2395757`；tag `1a478c8`；main `2395757`） | — |
 | TASK-013 提案（policy glob 布局化） | 用户批准立项 | ARCH | 补写权面契约（spec §8 遗留） |
 
 `user_signed` + 挂起清单清零 = 真闭环；解除条件成熟 → 触发者集中补测一轮。
@@ -125,4 +125,13 @@ selftest 28 项、tooling 安装面 6 套件全绿。交 QA 按 `arch-20261030-2
 - 发布记录：`dev-20261030-2311-release-v0.9.3.md`。
 - 备注：`de4a476` / `c0f4e44` 为发布门禁字段归一（`qa_report` 纯路径、
   `当前状态` 纯 `user_signed`），修复 pre-push path A 误判；tag 仍指向 release commit。
-- 遗留：AC-10 下游 `factor_synthesis` 重装 + 19 条 SKIP 转实跑，待下游窗口回填。
+- `2026-10-31 00:50`：DEV 发布 `v0.9.4` —— `main e5f27ef..2395757`；
+  release commit `2395757`；tag `v0.9.4` object `1a478c8`
+  （peeled `2395757`）；远端 main / tag 已落地。
+- v0.9.4 发布前核验：上游 450 项 0 失败；上游 selftest 28 项 0 失败；
+  下游 `factor_synthesis` 重装后 `trio-selftest --fast` 22 项 0 失败。
+- v0.9.4 pre-push：TASK-012 `strict` path A 通过；基线 `a44e7dc` ≠ 待推
+  `2395757`，delta 仅文档（5 个）→ 放行；审计无 bypass。
+- v0.9.4 发布记录：`dev-20261031-0050-release-v0.9.4.md`。
+- 遗留关闭：AC-10 下游复跑通过；19 条 SKIP 按 selftest 口径解除（余 3 个
+  scaffold-only 直接跑不属安装仓验收面）。
