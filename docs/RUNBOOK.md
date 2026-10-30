@@ -294,7 +294,69 @@ cp .omp/trio/templates/board.template.md docs/task/2026-10-25-登录改造/board
 
 ---
 
-## 5. 常见问题
+## 5. 上游脚手架升版后，下游项目怎么跟进
+
+本仓（omp-trio-scaffold）发了新 tag 之后，已初始化的下游项目**不需要推倒重来**，按三层分别处理：
+
+| 层 | 内容 | 升版动作 |
+|---|---|---|
+| 执行件（软链） | `trio-init` / `trio-start` / `trio-tmux` / `trio-selftest` / `trio-align` / `trio-install` 是指向本仓 `bin/*.sh` 的软链 | 本仓升版即生效，**下游零操作** |
+| 注入件（拷贝） | `.omp/**`、`docs/REPLY-CONVENTIONS.md`、`bin/trio-check-report.mjs`、`bin/trio-policy-eval.mjs`、`tests/*.test.mjs`、`.git/hooks/{pre-commit,pre-push,post-commit}` | 重跑 `trio-init`（覆盖语义见 §5.1） |
+| 进程内件 | `.omp/hooks/**`、`.omp/extensions/**` 在 omp 启动时加载 | 重跑后**重启所有窗口** |
+
+### 5.1 覆盖语义（决定加不加 `--force`）
+
+| 注入件 | 重跑 `trio-init` 时 |
+|---|---|
+| `templates/*.md`、`docs/REPLY-CONVENTIONS.md`、`.omp/hooks/pre/trio-guard.ts`、`.omp/extensions/*.ts`、`bin/trio-check-report.mjs`、`bin/trio-policy-eval.mjs`、`.git/hooks/{pre-commit,pre-push,post-commit}` | **始终升级覆盖** |
+| `.omp/trio/policy.txt` | 无差异 → 跳过；有差异 → **打印提示并保留本地版**，不覆盖 |
+| `.omp/trio/*.rules.md`、`tests/*.test.mjs` | 已存在即跳过（预期行为）；要上游新版须加 `--force` |
+
+### 5.2 标准步骤
+
+```bash
+# ① 本仓升版（软链命令随即指向新版）
+cd ~/projects/omp-trio-scaffold && git fetch --tags && git checkout v0.7.0
+trio-install --check            # 软链与仓库位置有效
+
+# ② 下游项目根，重跑注入
+#    注意：必须在【不设 TRIO_ROLE】的窗口执行 ——
+#    policy.txt 与 .omp/hooks/** 是三角色禁写区，带角色会话里重跑 init 会被门禁拒绝。
+cd ~/projects/my-app
+trio-init                       # 先不加 --force，看汇总的「新建/覆盖/跳过/失败」
+trio-init --force               # 需要跟进 rules / tests 新版时才加
+
+# ③ 重启所有 omp 窗口（hook/extension 进程内加载，改文件不热更）
+
+# ④ 自检
+trio-selftest --fast            # 全绿再干活
+trio-align --check              # 布局与 policy 零差异（exit 0）
+```
+
+> 三角色会话**进行中**不要重跑 `trio-init`：注入件改写会与进行中的提交/门禁交错。
+> 挑无角色窗口的时机执行（与本仓 §4.6 的「无角色窗口」惯例一致）。
+
+### 5.3 版本核对与回滚
+
+- 下游无版本戳，逐件核对漂移：
+  ```bash
+  cmp .omp/trio/policy.txt ~/projects/omp-trio-scaffold/.omp/trio/policy.txt
+  # 其余注入件同理；trio-align --check 覆盖布局与 policy 面
+  ```
+- 回滚：本仓 `git checkout <旧 tag>` 后重跑 `trio-init --force`。
+  `policy.txt` 从不被覆盖，回滚也不会动你本地调过的策略。
+
+### 5.4 升版常见坑
+
+| 现象 | 原因 | 处理 |
+|---|---|---|
+| init 报「失败 … PermissionDenied」 | 带 `TRIO_ROLE` 的会话里重跑，门禁按角色实例拦截 | 换无角色窗口重跑 |
+| 门禁行为还是旧版 | 只重跑了 init，没重启窗口 | 全部窗口退出重开 |
+| `*.rules.md` / `tests/` 没更新 | 已存在即跳过（预期行为） | `trio-init --force` |
+| `policy.txt` 没跟上上游 | 差异保留是设计（防变更被静默吞掉） | 看提示，人工比对后决定 |
+| 三个窗口策略不一致 | 窗口混用了不同 tag 的本仓 | 统一本仓 tag 后重跑 init |
+
+## 6. 常见问题
 
 **`trio-start: 找不到角色简报`**
 项目没初始化，或初始化不完整。在项目根执行 `trio-init`（首次）或
