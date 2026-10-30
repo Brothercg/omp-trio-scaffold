@@ -6,6 +6,25 @@
 格式：每版本一节，条目按「新增 / 修改 / 修复 / 弃用」分组，注明关联任务或 ADR。
 -->
 
+## v0.9.2 — 2026-10-30
+
+TASK-011：反馈 ⑬，`init-agent.sh` 自托管源侧解析（patch）。
+
+### 修复
+- 源侧逐载荷回退（S1）：hooks / 工具 / 测试 / 文档模板 / 角色简报分别按
+  「上游树 → 自托管树」取首个存在项；自托管（`tooling/bin/init-agent.sh`）不再
+  误读 `<root>/templates/<hook>`，修复 `sed: can't read .../templates/post-commit` 中途崩溃。
+- 缺源 fail-closed（S2）：hooks 三件全缺 → `未找到 hooks 源` + exit 1；其余载荷缺源
+  逐件 `失败 <rel>：源缺失 <候选列表>`，计入失败并继续，不再在 `sed`/`install` 处中断。
+- 干跑源校验（S3）：计划行前先解析源；缺源只打印失败行；`FAILED>0` 时干跑 exit 1。
+- 替换幂等（S4）：`bin/trio-` → `tooling/bin/trio-` 对已含 `tooling/` 前缀的 token
+  加保护，重复应用不产生 `tooling/tooling/`。
+
+### 测试
+- `tests/trio-init-layout.test.mjs` 增自托管夹具与 AC-1..AC-5 断言（现 21 项）；
+  `trio-gate-contract` / `trio-policy` 的源文本断言改为行为断言（部署结果）。
+- 全量 11 套件 445 项、`trio-selftest.sh --fast` 28 项全绿。
+
 ## v0.9.1 — 2026-10-30
 
 TASK-010：上游反馈 ⑫，`init-agent.sh` 根自定位补齐（patch）。
