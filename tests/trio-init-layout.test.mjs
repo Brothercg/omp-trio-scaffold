@@ -11,14 +11,41 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
+import { pathToFileURL } from "node:url";
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.resolve(HERE, "..");
-const INIT = path.join(ROOT, "bin/init-agent.sh");
-const ALIGN = path.join(ROOT, "bin/trio-align.sh");
-const TEMPLATES = path.join(ROOT, "templates");
+import { payload, projectRoot, toolPath } from "./_layout.mjs";
+
+const ROOT = projectRoot();
+const INIT = toolPath("init-agent.sh");
+const ALIGN = toolPath("trio-align.sh");
+// 安装布局用例需要安装器本身；纯消费仓（未携带 init-agent.sh）无此执行件。
+if (!INIT) {
+	console.log("提示  跳过 trio-init-layout：本仓无 init-agent.sh（安装布局用例不适用）");
+	process.exit(0);
+}
+
+function hookSrc(name) {
+	return payload(`tooling/hooks/${name}`, `templates/${name}`);
+}
+function templateSrc(name) {
+	return payload(`templates/${name}`, `.omp/trio/templates/${name}`);
+}
+const TEMPLATE_DIRS = [path.join(ROOT, "templates"), path.join(ROOT, ".omp/trio/templates")]
+	.filter((dir) => fs.existsSync(dir));
+const BIN_HOOK_SRC = payload("templates/pre-commit");
+const VALIDATOR = toolPath("trio-check-report.mjs");
+assert.ok(VALIDATOR, "未找到 trio-check-report.mjs");
+const { checkText } = await import(pathToFileURL(VALIDATOR).href);
+
+// R1 渲染（与 init-agent.sh render_payload 同步）：占位符保护已含前缀的 token。
+function render(text) {
+	const mark = "\u0001TRIO_MARK\u0001";
+	return text
+		.replaceAll("tooling/bin/trio-", mark)
+		.replace(/(^|[^A-Za-z0-9_.-])bin\/trio-/gu, "$1tooling/bin/trio-")
+		.replaceAll(mark, "tooling/bin/trio-");
+}
 
 let passed = 0;
 const failures = [];
@@ -174,11 +201,15 @@ check("AC-3 显式 bin 覆盖 auto；显式 tooling 落 tooling 并替换 hook",
 	const dir = newRepo();
 	try {
 		fs.mkdirSync(path.join(dir, "tooling/bin"), { recursive: true });
-		assert.equal(runInit([dir, "--layout", "bin"]).status, 0);
-		assert.ok(fs.existsSync(path.join(dir, "bin/trio-check-report.mjs")));
-		assert.ok(!fs.existsSync(path.join(dir, "tooling/bin/trio-check-report.mjs")));
-		const out = fs.readFileSync(path.join(dir, ".git/hooks/pre-push"), "utf8");
-		assert.match(out, /VALIDATOR_REL="bin\/trio-check-report\.mjs"/u);
+		if (BIN_HOOK_SRC) {
+			assert.equal(runInit([dir, "--layout", "bin"]).status, 0);
+			assert.ok(fs.existsSync(path.join(dir, "bin/trio-check-report.mjs")));
+			assert.ok(!fs.existsSync(path.join(dir, "tooling/bin/trio-check-report.mjs")));
+			const out = fs.readFileSync(path.join(dir, ".git/hooks/pre-push"), "utf8");
+			assert.match(out, /VALIDATOR_REL="bin\/trio-check-report\.mjs"/u);
+		} else {
+			console.log("  - 跳过 bin 交叉布局：本仓无 templates/pre-commit 源（条件注册）");
+		}
 
 		const dir2 = newRepo();
 		try {
@@ -225,9 +256,9 @@ check("AC-4 tooling：源副本逐字节同模板，产物路径替换正确", (
 	try {
 		assert.equal(runInit([dir, "--layout", "tooling"]).status, 0);
 		for (const hook of ["pre-commit", "pre-push", "post-commit"]) {
-			const src = fs.readFileSync(path.join(dir, "tooling/hooks", hook));
-			const tpl = fs.readFileSync(path.join(TEMPLATES, hook));
-			assert.deepEqual(src, tpl, `tooling/hooks/${hook} 应与模板逐字节相同`);
+			const src = fs.readFileSync(path.join(dir, "tooling/hooks", hook), "utf8");
+			const tpl = fs.readFileSync(hookSrc(hook), "utf8");
+			assert.equal(src, render(tpl), `tooling/hooks/${hook} 应与 render(模板) 相同`);
 		}
 		const push = fs.readFileSync(path.join(dir, ".git/hooks/pre-push"), "utf8");
 		assert.match(push, /VALIDATOR_REL="tooling\/bin\/trio-check-report\.mjs"/u);
@@ -245,7 +276,7 @@ check("AC-5 bin：hooks 与模板逐字节相同，新增 selftest 可执行", (
 		for (const hook of ["pre-commit", "pre-push", "post-commit"]) {
 			assert.deepEqual(
 				fs.readFileSync(path.join(dir, ".git/hooks", hook)),
-				fs.readFileSync(path.join(TEMPLATES, hook)),
+				fs.readFileSync(hookSrc(hook)),
 				`.git/hooks/${hook} 应与模板逐字节相同`,
 			);
 		}
@@ -284,7 +315,7 @@ check("AC-6 领先文件默认保留，--force 覆盖；policy 不受 --force", 
 		const f = runInit([dir, "--force"]);
 		assert.equal(f.status, 0, f.stderr);
 		assert.deepEqual(fs.readFileSync(reply), fs.readFileSync(path.join(ROOT, "docs/REPLY-CONVENTIONS.md")));
-		assert.deepEqual(fs.readFileSync(board), fs.readFileSync(path.join(TEMPLATES, "board.template.md")));
+		assert.deepEqual(fs.readFileSync(board), fs.readFileSync(templateSrc("board.template.md")));
 		assert.equal(fs.readFileSync(policy, "utf8"), "# LOCAL POLICY\n", "policy 不受 --force 影响");
 	} finally {
 		fs.rmSync(dir, { recursive: true, force: true });
@@ -318,6 +349,7 @@ function makeSourceRoot() {
 	return root;
 }
 
+if (ALIGN) {
 check("AC-8 align 在 bin/ 与 tooling/bin/ 均能定位根", () => {
 	const srcRoot = makeSourceRoot();
 	const target = newRepo();
@@ -356,13 +388,16 @@ check("AC-8 align 无 policy 目录 → exit 1 + 无法定位仓库根", () => {
 		fs.rmSync(target, { recursive: true, force: true });
 	}
 });
+} else {
+	console.log("  - 跳过 AC-8 align 根自定位：本布局无 trio-align.sh（条件注册）");
+}
 
 check("AC-8c init-agent 在 tooling/bin/ 自定位根（反馈 ⑫；缺源按 S2 报失败）", () => {
 	const srcRoot = makeSourceRoot();
 	const target = newRepo();
 	try {
 		fs.mkdirSync(path.join(srcRoot, "templates"), { recursive: true });
-		fs.copyFileSync(path.join(TEMPLATES, "pre-commit"), path.join(srcRoot, "templates/pre-commit"));
+		fs.copyFileSync(hookSrc("pre-commit"), path.join(srcRoot, "templates/pre-commit"));
 		const dir = path.join(srcRoot, "tooling/bin");
 		fs.mkdirSync(dir, { recursive: true });
 		fs.copyFileSync(INIT, path.join(dir, "init-agent.sh"));
@@ -413,7 +448,7 @@ check("AC-9 tooling 布局：套件解析到 tooling/tests、校验器可用、i
 	}
 });
 
-check("AC-9 bin 布局：套件解析到 tests/、校验器可用", () => {
+if (BIN_HOOK_SRC) check("AC-9 bin 布局：套件解析到 tests/、校验器可用", () => {
 	const dir = newRepo();
 	try {
 		assert.equal(runInit([dir, "--layout", "bin"]).status, 0);
@@ -449,12 +484,13 @@ function copyInto(src, dest) {
  */
 function makeSelfHosted({ withTemplatesHooks = true, withTemplatesMd = true } = {}) {
 	const root = newRepo();
-	copyInto(path.join(ROOT, "bin/init-agent.sh"), path.join(root, "tooling/bin/init-agent.sh"));
+	copyInto(INIT, path.join(root, "tooling/bin/init-agent.sh"));
 	for (const tool of TOOLS) {
-		copyInto(path.join(ROOT, "bin", tool), path.join(root, "tooling/bin", tool));
+		const src = toolPath(tool);
+		if (src) copyInto(src, path.join(root, "tooling/bin", tool));
 	}
 	for (const hook of ["pre-commit", "pre-push", "post-commit"]) {
-		copyInto(path.join(TEMPLATES, hook), path.join(root, "tooling/hooks", hook));
+		copyInto(hookSrc(hook), path.join(root, "tooling/hooks", hook));
 	}
 	fs.mkdirSync(path.join(root, "tooling/tests"), { recursive: true });
 	fs.writeFileSync(path.join(root, "tooling/tests/dummy.test.mjs"), 'console.log("ok");\n');
@@ -480,14 +516,16 @@ function makeSelfHosted({ withTemplatesHooks = true, withTemplatesMd = true } = 
 	);
 	if (withTemplatesHooks) {
 		fs.mkdirSync(path.join(root, "templates"), { recursive: true });
-		copyInto(path.join(TEMPLATES, "pre-commit"), path.join(root, "templates/pre-commit"));
-		copyInto(path.join(TEMPLATES, "pre-push"), path.join(root, "templates/pre-push"));
+		copyInto(hookSrc("pre-commit"), path.join(root, "templates/pre-commit"));
+		copyInto(hookSrc("pre-push"), path.join(root, "templates/pre-push"));
 	}
 	if (withTemplatesMd) {
 		fs.mkdirSync(path.join(root, "templates"), { recursive: true });
-		for (const name of fs.readdirSync(TEMPLATES)) {
-			if (!name.endsWith(".md")) continue;
-			copyInto(path.join(TEMPLATES, name), path.join(root, "templates", name));
+		for (const dir of TEMPLATE_DIRS) {
+			for (const name of fs.readdirSync(dir)) {
+				if (!name.endsWith(".md")) continue;
+				copyInto(path.join(dir, name), path.join(root, "templates", name));
+			}
 		}
 	}
 	return root;
@@ -549,16 +587,17 @@ check("AC-3 仅自托管源：模板/简报/工具/测试落点 cmp -s", () => {
 		});
 		assert.equal(r.status, 0, `${r.stdout}${r.stderr}`);
 		const pairs = [
-			["tooling/bin/trio-check-report.mjs", "tooling/bin/trio-check-report.mjs"],
-			["tooling/tests/dummy.test.mjs", "tooling/tests/dummy.test.mjs"],
-			[".omp/trio/arch.rules.md", ".omp/trio/arch.rules.md"],
-			[".omp/trio/templates/board.template.md", ".omp/trio/templates/board.template.md"],
+			["tooling/bin/trio-check-report.mjs", "tooling/bin/trio-check-report.mjs", false],
+			["tooling/tests/dummy.test.mjs", "tooling/tests/dummy.test.mjs", false],
+			[".omp/trio/arch.rules.md", ".omp/trio/arch.rules.md", true],
+			[".omp/trio/templates/board.template.md", ".omp/trio/templates/board.template.md", true],
 		];
-		for (const [rel, srcRel] of pairs) {
+		for (const [rel, srcRel, rendered] of pairs) {
+			const source = fs.readFileSync(path.join(src, srcRel));
 			assert.deepEqual(
 				fs.readFileSync(path.join(target, rel)),
-				fs.readFileSync(path.join(src, srcRel)),
-				`${rel} 应与自托管源逐字节相同`,
+				rendered ? Buffer.from(render(source.toString("utf8"))) : source,
+				`${rel} 应与${rendered ? " render(源)" : "自托管源"}逐字节相同`,
 			);
 		}
 	} finally {
@@ -600,6 +639,180 @@ check("AC-5 已含 tooling/bin 前缀的 hook 源 → 产物 cmp 源、无 tooli
 		}
 	} finally {
 		fs.rmSync(root, { recursive: true, force: true });
+	}
+});
+
+
+// ── TASK-012 安装面渲染与测试面（AC-1..AC-9）─────────────────────────────
+
+console.log("\n[TASK-012 安装面渲染与测试面]");
+
+function fillReportTemplate(file) {
+	return fs
+		.readFileSync(file, "utf8")
+		.replaceAll("<YYYYMMDD>", "20261025")
+		.replaceAll("<HHMM>", "1510")
+		.replaceAll("<主题>", "demo")
+		.replaceAll("<x.y.z>", "1.0.0")
+		.replaceAll("<hash>", "3b6f308")
+		.replaceAll("<YYYY-MM-DD HH:MM>", "2026-10-25 15:10")
+		.replaceAll("<N>", "1")
+		.replaceAll("`<用例编号>`", "AC-1");
+}
+
+function assertRenderedRefs(file, label) {
+	const text = fs.readFileSync(file, "utf8");
+	assert.ok(!text.includes("tooling/tooling/"), `${label} 出现 tooling/tooling/`);
+	const all = text.match(/bin\/trio-/gu) ?? [];
+	const prefixed = text.match(/tooling\/bin\/trio-/gu) ?? [];
+	const naked = text.match(/(?<!tooling\/)bin\/trio-/gu) ?? [];
+	assert.deepEqual(naked, [], `${label} 存在未加 tooling/ 前缀的 bin/trio-`);
+	assert.equal(all.length, prefixed.length, `${label} 的 bin/trio- 计数与前缀计数不一致`);
+}
+
+check("AC-1/AC-8 tooling 安装：全部落点渲染，禁词为零，安装件模板可校验", () => {
+	const dir = newRepo();
+	try {
+		const r = runInit([dir, "--layout", "tooling"]);
+		assert.equal(r.status, 0, `${r.stdout}${r.stderr}`);
+		const files = [];
+		for (const name of fs.readdirSync(path.join(dir, ".omp/trio/templates"))) {
+			if (name.endsWith(".md")) files.push(path.join(dir, ".omp/trio/templates", name));
+		}
+		for (const role of ["arch", "dev", "test"]) files.push(path.join(dir, `.omp/trio/${role}.rules.md`));
+		files.push(path.join(dir, "docs/REPLY-CONVENTIONS.md"));
+		for (const hook of ["pre-commit", "pre-push", "post-commit"]) {
+			files.push(path.join(dir, "tooling/hooks", hook), path.join(dir, ".git/hooks", hook));
+		}
+		for (const file of files) assertRenderedRefs(file, file.slice(dir.length + 1));
+
+		const template = path.join(dir, ".omp/trio/templates/report.template.md");
+		const violations = checkText("qa-20261025-1510-report-demo.md", fillReportTemplate(template), dir);
+		assert.deepEqual(
+			violations.map((v) => `${v.rule}: ${v.message}`),
+			[],
+			"安装件 report.template.md 填充后应零违规",
+		);
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+check("AC-3 已适配源 --force 二次安装 0 覆盖；根 tests 不倒灌 tooling/tests", () => {
+	const src = makeSelfHosted();
+	const target = newRepo();
+	try {
+		fs.mkdirSync(path.join(src, "tests"), { recursive: true });
+		fs.writeFileSync(path.join(src, "tests", "fail-bleed.test.mjs"), 'console.log("FAIL"); process.exit(1);\n');
+		let r = runSelf(src, [target, "--layout", "tooling"]);
+		assert.equal(r.status, 0, `${r.stdout}${r.stderr}`);
+		assert.ok(!fs.existsSync(path.join(target, "tooling/tests/fail-bleed.test.mjs")), "根 tests 被倒灌");
+		assert.ok(fs.existsSync(path.join(target, "tooling/tests/dummy.test.mjs")));
+		const before = snap(path.join(target, "tooling/tests"));
+		r = runSelf(src, [target, "--layout", "tooling", "--force"]);
+		assert.equal(r.status, 0, `${r.stdout}${r.stderr}`);
+		assert.match(r.stdout, /完成：新建\/覆盖 0 项，跳过 \d+ 项，失败 0 件。/u);
+		assert.deepEqual(snap(path.join(target, "tooling/tests")), before, "tooling/tests 快照被改写");
+
+		fs.mkdirSync(path.join(target, "tests"), { recursive: true });
+		fs.writeFileSync(path.join(target, "tests", "fail-bleed.test.mjs"), 'console.log("FAIL"); process.exit(1);\n');
+		fs.writeFileSync(
+			path.join(target, "tooling/tests/marked.test.mjs"),
+			'// @trio-suite scaffold-only\nconsole.log("FAIL"); process.exit(1);\n',
+		);
+		const st = spawnSync("bash", [path.join(target, "tooling/bin/trio-selftest.sh"), target, "--fast"], {
+			encoding: "utf8",
+			env: ENV,
+		});
+		assert.equal(st.status, 0, `${st.stdout}\n${st.stderr}`);
+		assert.match(st.stdout, /提示  忽略 tests\/（1 个 \.test\.mjs，与本布局不符，保留未删除）/u);
+		assert.match(st.stdout, /跳过  marked（脚手架自检套件，不适用本仓）/u);
+	} finally {
+		fs.rmSync(src, { recursive: true, force: true });
+		fs.rmSync(target, { recursive: true, force: true });
+	}
+});
+
+check("AC-4 模板名册并集安装齐全；单件缺源逐件失败不中断", () => {
+	const src = makeSelfHosted({ withTemplatesMd: false });
+	const target = newRepo();
+	const target2 = newRepo();
+	try {
+		fs.mkdirSync(path.join(src, "templates"), { recursive: true });
+		for (const name of fs.readdirSync(path.join(src, ".omp/trio/templates"))) {
+			if (name.endsWith(".md")) {
+				fs.rmSync(path.join(src, ".omp/trio/templates", name), { force: true });
+			}
+		}
+		copyInto(templateSrc("report.template.md"), path.join(src, "templates/report.template.md"));
+		copyInto(templateSrc("bug.template.md"), path.join(src, "templates/bug.template.md"));
+		copyInto(templateSrc("board.template.md"), path.join(src, ".omp/trio/templates/board.template.md"));
+
+		let r = runSelf(src, [target, "--layout", "tooling"]);
+		assert.equal(r.status, 0, `${r.stdout}${r.stderr}`);
+		for (const name of ["report.template.md", "bug.template.md", "board.template.md"]) {
+			assert.ok(fs.existsSync(path.join(target, ".omp/trio/templates", name)), `缺模板 ${name}`);
+		}
+
+		// 单件候选全缺：目录条目仍在名册，但两个候选都不是可读文件。
+		fs.rmSync(path.join(src, "templates/bug.template.md"));
+		fs.mkdirSync(path.join(src, "templates/bug.template.md"));
+		r = runSelf(src, [target2, "--layout", "tooling"]);
+		assert.equal(r.status, 1, `${r.stdout}${r.stderr}`);
+		assert.match(r.stdout, /失败  \.omp\/trio\/templates\/bug\.template\.md：源缺失/u);
+		assert.ok(fs.existsSync(path.join(target2, ".omp/trio/templates/report.template.md")), "其余件应继续");
+		assert.ok(fs.existsSync(path.join(target2, ".omp/trio/templates/board.template.md")), "其余件应继续");
+	} finally {
+		fs.rmSync(src, { recursive: true, force: true });
+		fs.rmSync(target, { recursive: true, force: true });
+		fs.rmSync(target2, { recursive: true, force: true });
+	}
+});
+
+check("AC-5 首选目录为空时回退另一目录并提示", () => {
+	const dir = newRepo();
+	try {
+		const r = runInit([dir, "--layout", "tooling"]);
+		assert.equal(r.status, 0, `${r.stdout}${r.stderr}`);
+		for (const name of fs.readdirSync(path.join(dir, "tooling/tests"))) {
+			if (name.endsWith(".test.mjs")) fs.rmSync(path.join(dir, "tooling/tests", name));
+		}
+		fs.mkdirSync(path.join(dir, "tests"), { recursive: true });
+		fs.writeFileSync(path.join(dir, "tests", "fallback.test.mjs"), 'console.log("通过 1 项，失败 0 项");\n');
+		const st = spawnSync("bash", [path.join(dir, "tooling/bin/trio-selftest.sh"), dir, "--fast"], {
+			encoding: "utf8",
+			env: ENV,
+		});
+		assert.equal(st.status, 0, `${st.stdout}\n${st.stderr}`);
+		assert.match(st.stdout, /提示  tooling\/tests\/ 无套件，回退 tests\/（1 个 \.test\.mjs）/u);
+		assert.match(st.stdout, /tests\/fallback\.test\.mjs/u);
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+check("AC-9 tooling 部署面：建 tooling/tests、携带 _layout.mjs、测试逐字节=源", () => {
+	const dir = newRepo();
+	try {
+		const r = runInit([dir, "--layout", "tooling"]);
+		assert.equal(r.status, 0, `${r.stdout}${r.stderr}`);
+		assert.ok(fs.existsSync(path.join(dir, "tooling/tests")), "未创建 tooling/tests");
+		assert.ok(!fs.existsSync(path.join(dir, "tests")), "不应再固定创建 tests/");
+		assert.ok(fs.existsSync(path.join(dir, "tooling/tests/_layout.mjs")), "未部署 _layout.mjs");
+		const srcTests = fs.existsSync(path.join(ROOT, "tooling/tests"))
+			? path.join(ROOT, "tooling/tests")
+			: path.join(ROOT, "tests");
+		for (const name of fs.readdirSync(srcTests)) {
+			if (!name.endsWith(".mjs")) continue;
+			assert.deepEqual(
+				fs.readFileSync(path.join(dir, "tooling/tests", name)),
+				fs.readFileSync(path.join(srcTests, name)),
+				`${name} 应与源逐字节相同（零渲染）`,
+			);
+		}
+		assert.ok(!fs.existsSync(path.join(dir, "tooling/tests/repro")), "tests/repro 不应部署");
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
 	}
 });
 

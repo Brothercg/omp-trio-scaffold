@@ -13,13 +13,14 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { execFileSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.resolve(HERE, "..");
-const PRECOMMIT = path.join(ROOT, "templates", "pre-commit");
-const POSTCOMMIT = path.join(ROOT, "templates", "post-commit");
+import { payload } from "./_layout.mjs";
+
+// R3：tooling 布局优先安装面 hook；上游 / bin 布局回退模板源区。
+const PRECOMMIT = payload("tooling/hooks/pre-commit", "templates/pre-commit", ".git/hooks/pre-commit");
+const POSTCOMMIT = payload("tooling/hooks/post-commit", "templates/post-commit", ".git/hooks/post-commit");
+assert.ok(PRECOMMIT && POSTCOMMIT, "未找到 pre-commit / post-commit");
 
 let passed = 0;
 const failures = [];

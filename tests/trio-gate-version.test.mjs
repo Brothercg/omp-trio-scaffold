@@ -11,15 +11,19 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { execFileSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { pathToFileURL } from "node:url";
 import assert from "node:assert/strict";
 
-import registerGuard from "../.omp/hooks/pre/trio-guard.ts";
+import { payload, projectRoot } from "./_layout.mjs";
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.resolve(HERE, "..");
-const PRECOMMIT = path.join(ROOT, "templates", "pre-commit");
-const PREPUSH = path.join(ROOT, "templates", "pre-push");
+const ROOT = projectRoot();
+const GUARD = payload("tooling/bin/../.omp/hooks/pre/trio-guard.ts", ".omp/hooks/pre/trio-guard.ts");
+assert.ok(GUARD, "未找到 trio-guard.ts");
+const { default: registerGuard } = await import(pathToFileURL(GUARD).href);
+// R3：tooling 布局优先安装面 hook；上游/ bin 布局回退 templates。
+const PRECOMMIT = payload("tooling/hooks/pre-commit", "templates/pre-commit", ".git/hooks/pre-commit");
+const PREPUSH = payload("tooling/hooks/pre-push", "templates/pre-push", ".git/hooks/pre-push");
+assert.ok(PRECOMMIT && PREPUSH, "未找到 pre-commit / pre-push");
 const BASE = fs.readFileSync(path.join(ROOT, ".omp", "trio", "policy.txt"), "utf8")
 	.split("\n")
 	.filter((line) => !line.startsWith("# gate-version:"))
@@ -86,6 +90,18 @@ function makeRepo(variant) {
 	fs.writeFileSync(path.join(dir, ".omp", "trio", "policy.txt"), policyFor(variant));
 	fs.mkdirSync(path.join(dir, "src"), { recursive: true });
 	fs.writeFileSync(path.join(dir, "src", "a.py"), "x\n");
+	// 执行件随仓库走：两布局都放一份，渲染前后的 hook 均可找到判定器/校验器。
+	const guard = payload(".omp/hooks/pre/trio-guard.ts");
+	fs.mkdirSync(path.join(dir, ".omp/hooks/pre"), { recursive: true });
+	if (guard) fs.copyFileSync(guard, path.join(dir, ".omp/hooks/pre/trio-guard.ts"));
+	for (const dirRel of ["bin", "tooling/bin"]) {
+		for (const tool of ["trio-policy-eval.mjs", "trio-check-report.mjs"]) {
+			const src = payload(`tooling/bin/${tool}`, `bin/${tool}`);
+			if (!src) continue;
+			fs.mkdirSync(path.join(dir, dirRel), { recursive: true });
+			fs.copyFileSync(src, path.join(dir, dirRel, tool));
+		}
+	}
 	fs.mkdirSync(path.join(dir, "docs", "task", "T"), { recursive: true });
 	fs.writeFileSync(
 		path.join(dir, "docs", "task", "T", "board.md"),

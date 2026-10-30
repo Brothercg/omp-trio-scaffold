@@ -25,14 +25,15 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.resolve(HERE, "..");
-const HOOK = path.join(ROOT, "templates", "pre-push");
-const VALIDATOR = path.join(ROOT, "bin", "trio-check-report.mjs");
+import { payload, toolPath } from "./_layout.mjs";
+
+// R3：tooling 布局优先安装面 hook；上游 / bin 布局回退模板源区。
+const HOOK = payload("tooling/hooks/pre-push", "templates/pre-push", ".git/hooks/pre-push");
+const VALIDATOR = toolPath("trio-check-report.mjs");
+assert.ok(HOOK && VALIDATOR, "未找到 pre-push / trio-check-report.mjs");
 
 // ── 断言框架 ───────────────────────────────────────────────────────────────
 
@@ -60,9 +61,12 @@ function makeFakeRepo() {
 	execFileSync("git", ["config", "user.name", "t"], { cwd: dir });
 	fs.writeFileSync(path.join(dir, "f.txt"), "hi\n");
 	execFileSync("git", ["add", "f.txt"], { cwd: dir });
-	// 校验器随仓库走：dev 分支的放行前置 a 需要真实跑报告校验
-	fs.mkdirSync(path.join(dir, "bin"), { recursive: true });
-	fs.copyFileSync(VALIDATOR, path.join(dir, "bin", "trio-check-report.mjs"));
+	// 校验器随仓库走：dev 分支的放行前置 a 需要真实跑报告校验。
+	// 源 hook 引用 bin/，渲染后 hook 引用 tooling/bin/，两处都放。
+	for (const dirRel of ["bin", "tooling/bin"]) {
+		fs.mkdirSync(path.join(dir, dirRel), { recursive: true });
+		fs.copyFileSync(VALIDATOR, path.join(dir, dirRel, "trio-check-report.mjs"));
+	}
 	// TASK-007 AC-5：执法件版本自证依赖 policy 的 gate-version 声明。
 	fs.mkdirSync(path.join(dir, ".omp", "trio"), { recursive: true });
 	fs.writeFileSync(path.join(dir, ".omp", "trio", "policy.txt"), "# gate-version: 1\n");

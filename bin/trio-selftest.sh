@@ -112,9 +112,12 @@ PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd)"
 HOOK="${PROJECT_DIR}/.omp/hooks/pre/trio-guard.ts"
 POLICY="${PROJECT_DIR}/.omp/trio/policy.txt"
 PRECOMMIT="${PROJECT_DIR}/.git/hooks/pre-commit"
-VALIDATOR="${PROJECT_DIR}/bin/trio-check-report.mjs"
-if [[ ! -f "$VALIDATOR" ]]; then
+if [[ "$SELF_DIR" == "${SCAFFOLD_ROOT}/tooling/bin" ]]; then
 	VALIDATOR="${PROJECT_DIR}/tooling/bin/trio-check-report.mjs"
+	[[ -f "$VALIDATOR" ]] || VALIDATOR="${PROJECT_DIR}/bin/trio-check-report.mjs"
+else
+	VALIDATOR="${PROJECT_DIR}/bin/trio-check-report.mjs"
+	[[ -f "$VALIDATOR" ]] || VALIDATOR="${PROJECT_DIR}/tooling/bin/trio-check-report.mjs"
 fi
 EXTENSION="${PROJECT_DIR}/.omp/extensions/trio-session-name.ts"
 
@@ -175,7 +178,11 @@ else
 	missing=1
 fi
 if [[ "$missing" -eq 1 ]]; then
-	red "  安装不完整，后续测试无意义。先运行：${SCAFFOLD_ROOT}/bin/init-agent.sh ${PROJECT_DIR}"
+	INIT_HINT="${SCAFFOLD_ROOT}/bin/init-agent.sh"
+	if [[ "$SELF_DIR" == "${SCAFFOLD_ROOT}/tooling/bin" && -f "${SCAFFOLD_ROOT}/tooling/bin/init-agent.sh" ]]; then
+		INIT_HINT="${SCAFFOLD_ROOT}/tooling/bin/init-agent.sh"
+	fi
+	red "  安装不完整，后续测试无意义。先运行：${INIT_HINT} ${PROJECT_DIR}"
 	exit 1
 fi
 
@@ -222,19 +229,43 @@ if ! command -v bun >/dev/null 2>&1; then
 	red "  ✗ 缺少 bun，无法运行单元测试"
 	FAIL=$((FAIL + 1))
 else
-	shopt -s nullglob
-	suites=("${SCAFFOLD_ROOT}"/tests/*.test.mjs)
-	if [[ ${#suites[@]} -eq 0 ]]; then
-		suites=("${SCAFFOLD_ROOT}"/tooling/tests/*.test.mjs)
+	AUTHORING=0
+	if [[ -d "${SCAFFOLD_ROOT}/profiles" && -f "${SCAFFOLD_ROOT}/bin/trio-align.sh" ]]; then
+		AUTHORING=1
 	fi
+	# R6：按脚本自身布局选套件目录；首选非空只跑首选，另一目录忽略并提示。
+	if [[ "$SELF_DIR" == "${SCAFFOLD_ROOT}/tooling/bin" ]]; then
+		preferred_rel="tooling/tests"
+		other_rel="tests"
+	else
+		preferred_rel="tests"
+		other_rel="tooling/tests"
+	fi
+	shopt -s nullglob
+	suites=("${SCAFFOLD_ROOT}/${preferred_rel}"/*.test.mjs)
+	other_suites=("${SCAFFOLD_ROOT}/${other_rel}"/*.test.mjs)
 	shopt -u nullglob
+	if [[ ${#suites[@]} -eq 0 && ${#other_suites[@]} -gt 0 ]]; then
+		printf '提示  %s/ 无套件，回退 %s/（%d 个 .test.mjs）\n' \
+			"$preferred_rel" "$other_rel" "${#other_suites[@]}"
+		suites=("${other_suites[@]}")
+	elif [[ ${#suites[@]} -gt 0 && ${#other_suites[@]} -gt 0 ]]; then
+		printf '提示  忽略 %s/（%d 个 .test.mjs，与本布局不符，保留未删除）\n' \
+			"$other_rel" "${#other_suites[@]}"
+	fi
 	if [[ ${#suites[@]} -eq 0 ]]; then
-		red "  ✗ 未找到任何测试套件：${SCAFFOLD_ROOT}/tests/*.test.mjs 或 ${SCAFFOLD_ROOT}/tooling/tests/*.test.mjs"
+		red "  ✗ 未找到任何测试套件：${SCAFFOLD_ROOT}/${preferred_rel}/*.test.mjs 或 ${SCAFFOLD_ROOT}/${other_rel}/*.test.mjs"
 		FAIL=$((FAIL + 1))
 	else
 		for file in "${suites[@]}"; do
 			name="${file##*/}"
 			name="${name%.test.mjs}"
+			# R6：脚手架专有套件在安装仓不适用；不计通过/失败。
+			# 上游 authoring 仓（有 profiles/ 与 bin/trio-align.sh）仍执行，保留自检覆盖。
+			if [[ "$AUTHORING" -eq 0 ]] && head -n 20 "$file" | grep -q '@trio-suite scaffold-only'; then
+				printf '  跳过  %s（脚手架自检套件，不适用本仓）\n' "$name"
+				continue
+			fi
 			if bun "$file" >/tmp/trio-unit-out.$$ 2>&1; then
 				summary="$(grep -oE '通过 [0-9]+ 项|[0-9]+ passed' /tmp/trio-unit-out.$$ | tail -1)"
 				green "  ✓ ${name} 测试通过（${file#"${SCAFFOLD_ROOT}"/}；${summary:-完成}）"

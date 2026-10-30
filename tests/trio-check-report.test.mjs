@@ -11,21 +11,21 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
+import { pathToFileURL } from "node:url";
 import assert from "node:assert/strict";
 
-import {
-	checkText,
-	checkName,
-	checkCompanions,
-	checkT10,
-	main,
-	VERDICTS,
-} from "../bin/trio-check-report.mjs";
+import { projectRoot, toolPath } from "./_layout.mjs";
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.resolve(HERE, "..");
-const TEMPLATES = path.join(ROOT, "templates");
+const ROOT = projectRoot();
+const VALIDATOR = toolPath("trio-check-report.mjs");
+assert.ok(VALIDATOR, "未找到 trio-check-report.mjs");
+const { checkText, checkName, checkCompanions, checkT10, main, VERDICTS } =
+	await import(pathToFileURL(VALIDATOR).href);
+
+// R7：源区与安装面各自存在的模板目录（逐现存目录校验）。
+const TEMPLATE_DIRS = [path.join(ROOT, "templates"), path.join(ROOT, ".omp/trio/templates")]
+	.filter((dir) => fs.existsSync(path.join(dir, "report.template.md")));
+const TEMPLATES = TEMPLATE_DIRS[0];
 
 const GOOD_NAME = "qa-20261025-1510-report-登录改造.md";
 
@@ -95,8 +95,11 @@ check("结论值域恰为四值", () => {
 });
 
 check("templates 目录下的模板文件被豁免", () => {
-	const out = main(["--", path.join(TEMPLATES, "report.template.md")]);
-	assert.equal(out, 0, "模板应豁免且退出码 0");
+	assert.ok(TEMPLATE_DIRS.length > 0, "未找到 report.template.md");
+	for (const dir of TEMPLATE_DIRS) {
+		const out = main(["--", path.join(dir, "report.template.md")]);
+		assert.equal(out, 0, `${dir} 模板应豁免且退出码 0`);
+	}
 });
 
 check("下划线前缀文件被豁免", () => {
@@ -298,28 +301,33 @@ check("无伴随文件 → 零违规", () => {
 console.log("\n[模板联动]");
 
 check("report.template.md 存在且命名为模板（不占记录命名位）", () => {
-	const template = path.join(TEMPLATES, "report.template.md");
-	assert.ok(fs.existsSync(template), "缺少 templates/report.template.md");
-	assert.match(path.basename(template), /\.template\.md$/, "模板应以 .template.md 结尾");
+	assert.ok(TEMPLATE_DIRS.length > 0, "缺少 report.template.md");
+	for (const dir of TEMPLATE_DIRS) {
+		const template = path.join(dir, "report.template.md");
+		assert.match(path.basename(template), /\.template\.md$/, "模板应以 .template.md 结尾");
+	}
 });
 
 check("填充后的模板可通过校验", () => {
-	const template = fs.readFileSync(path.join(TEMPLATES, "report.template.md"), "utf8");
-	const filled = template
-		.replaceAll("<YYYYMMDD>", "20261025")
-		.replaceAll("<HHMM>", "1510")
-		.replaceAll("<主题>", "demo")
-		.replaceAll("<x.y.z>", "1.0.0")
-		.replaceAll("<hash>", "3b6f308")
-		.replaceAll("<YYYY-MM-DD HH:MM>", "2026-10-25 15:10")
-		.replaceAll("<N>", "1")
-		.replaceAll("`<用例编号>`", "AC-1");
-	const violations = checkText("qa-20261025-1510-report-demo.md", filled);
-	assert.deepEqual(
-		violations.map((violation) => `${violation.rule}: ${violation.message}`),
-		[],
-		"填充后的模板应零违规",
-	);
+	assert.ok(TEMPLATE_DIRS.length > 0, "缺少 report.template.md");
+	for (const dir of TEMPLATE_DIRS) {
+		const template = fs.readFileSync(path.join(dir, "report.template.md"), "utf8");
+		const filled = template
+			.replaceAll("<YYYYMMDD>", "20261025")
+			.replaceAll("<HHMM>", "1510")
+			.replaceAll("<主题>", "demo")
+			.replaceAll("<x.y.z>", "1.0.0")
+			.replaceAll("<hash>", "3b6f308")
+			.replaceAll("<YYYY-MM-DD HH:MM>", "2026-10-25 15:10")
+			.replaceAll("<N>", "1")
+			.replaceAll("`<用例编号>`", "AC-1");
+		const violations = checkText("qa-20261025-1510-report-demo.md", filled, ROOT);
+		assert.deepEqual(
+			violations.map((violation) => `${violation.rule}: ${violation.message}`),
+			[],
+			`${dir} 填充后的模板应零违规`,
+		);
+	}
 });
 
 // ── 11.5 T11 根因分类机检（TASK-007 AC-9）──────────────────────────────────
@@ -623,6 +631,7 @@ check("第四参 Violation 构造器可注入（审计钩子签名）", () => {
 });
 
 check("AC-7 CLI --help 行为不变（T1–T10 更新后仍只校验一个文件参数）", () => {
+	assert.ok(TEMPLATES, "缺少 report.template.md");
 	const out = main(["--", path.join(TEMPLATES, "report.template.md")]);
 	assert.equal(out, 0);
 });

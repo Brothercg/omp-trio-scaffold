@@ -9,7 +9,7 @@
 #   4. 注入 .omp/hooks/pre/trio-guard.ts —— 进程内写前拦截
 #      注入 .omp/extensions/trio-session-name.ts —— 会话名自动设为角色
 #   5. 注入 .git/hooks/pre-commit + pre-push + bin/trio-check-report.mjs —— 提交兜底与报告校验
-#   6. 注入 tests/ —— 全部门禁回归测试
+#   6. 注入测试面（bin: tests/；tooling: tooling/tests/）—— 全部门禁回归测试
 #
 # U1 升级语义：
 #   执行件（.omp/hooks/**、bin/**、templates/**、git hooks）直接覆盖为新版；
@@ -19,8 +19,8 @@
 #
 # 布局（ADR-0015）：
 #   --layout auto（默认）按 <目标>/tooling/bin 是否存在判定 bin / tooling；
-#   tooling 布局落 tooling/bin、tooling/tests、tooling/hooks，.git/hooks 产物
-#   做一次 bin/trio- -> tooling/bin/trio- 文本替换；bin 布局保持原落点。
+#   tooling 布局落 tooling/bin、tooling/tests、tooling/hooks；模板/简报/REPLY/
+#   hook 落点统一渲染 bin/trio- -> tooling/bin/trio-（幂等）；bin 布局保持原落点与源字节。
 #
 # 用法：
 #   bin/init-agent.sh [目标项目路径] [--force] [--dry-run] [--layout <auto|bin|tooling>]
@@ -55,20 +55,34 @@ readonly SCAFFOLD_ROOT
 # 自托管模式下源件分布在 tooling/{bin,tests,hooks} 与 .omp/trio/；
 # 逐载荷独立回退，不要求整棵树同源。
 
+# R3：执行件（hook/tool/tests）在 tooling 布局下布局目录优先；bin 布局保持原序。
+# 模板/简报是 authoring 面，始终源区优先（R2 / S1）。
 src_candidates() {
 	local kind="$1" name="${2:-}"
 	case "$kind" in
 		hook)
-			printf '%s\n' "${SCAFFOLD_ROOT}/templates/${name}" "${SCAFFOLD_ROOT}/tooling/hooks/${name}"
+			if [[ "${LAYOUT:-bin}" == "tooling" ]]; then
+				printf '%s\n' "${SCAFFOLD_ROOT}/tooling/hooks/${name}" "${SCAFFOLD_ROOT}/templates/${name}"
+			else
+				printf '%s\n' "${SCAFFOLD_ROOT}/templates/${name}" "${SCAFFOLD_ROOT}/tooling/hooks/${name}"
+			fi
 			;;
 		tool)
-			printf '%s\n' "${SCAFFOLD_ROOT}/bin/${name}" "${SCAFFOLD_ROOT}/tooling/bin/${name}"
+			if [[ "${LAYOUT:-bin}" == "tooling" ]]; then
+				printf '%s\n' "${SCAFFOLD_ROOT}/tooling/bin/${name}" "${SCAFFOLD_ROOT}/bin/${name}"
+			else
+				printf '%s\n' "${SCAFFOLD_ROOT}/bin/${name}" "${SCAFFOLD_ROOT}/tooling/bin/${name}"
+			fi
 			;;
 		tests)
-			printf '%s\n' "${SCAFFOLD_ROOT}/tests/*.test.mjs" "${SCAFFOLD_ROOT}/tooling/tests/*.test.mjs"
+			if [[ "${LAYOUT:-bin}" == "tooling" ]]; then
+				printf '%s\n' "${SCAFFOLD_ROOT}/tooling/tests/*.mjs" "${SCAFFOLD_ROOT}/tests/*.mjs"
+			else
+				printf '%s\n' "${SCAFFOLD_ROOT}/tests/*.mjs" "${SCAFFOLD_ROOT}/tooling/tests/*.mjs"
+			fi
 			;;
 		tpl)
-			printf '%s\n' "${SCAFFOLD_ROOT}/templates/*.md" "${SCAFFOLD_ROOT}/.omp/trio/templates/*.md"
+			printf '%s\n' "${SCAFFOLD_ROOT}/templates/${name}" "${SCAFFOLD_ROOT}/.omp/trio/templates/${name}"
 			;;
 		profiles)
 			printf '%s\n' "${SCAFFOLD_ROOT}/profiles/${name}" "${SCAFFOLD_ROOT}/.omp/trio/${name}"
@@ -88,19 +102,17 @@ resolve_src() {
 	return 1
 }
 
-# resolve_glob_dir <tests|tpl> -> 首个含匹配文件的目录；无则返回 1。
+# resolve_glob_dir tests -> 按布局取首个含 *.mjs 的测试目录；无则返回 1。
 resolve_glob_dir() {
 	local kind="$1" pattern dir
-	case "$kind" in
-		tests) pattern='*.test.mjs' ;;
-		tpl) pattern='*.md' ;;
-		*) return 1 ;;
-	esac
+	[[ "$kind" == "tests" ]] || return 1
+	pattern='*.mjs'
 	local -a candidates=()
-	case "$kind" in
-		tests) candidates=("${SCAFFOLD_ROOT}/tests" "${SCAFFOLD_ROOT}/tooling/tests") ;;
-		tpl) candidates=("${SCAFFOLD_ROOT}/templates" "${SCAFFOLD_ROOT}/.omp/trio/templates") ;;
-	esac
+	if [[ "$LAYOUT" == "tooling" ]]; then
+		candidates=("${SCAFFOLD_ROOT}/tooling/tests" "${SCAFFOLD_ROOT}/tests")
+	else
+		candidates=("${SCAFFOLD_ROOT}/tests" "${SCAFFOLD_ROOT}/tooling/tests")
+	fi
 	for dir in "${candidates[@]}"; do
 		if compgen -G "${dir}/${pattern}" >/dev/null; then
 			printf '%s' "$dir"
@@ -254,6 +266,12 @@ else
 	HOOK_SRC_REL=""
 fi
 
+# R3：布局确定后重新解析执行件源序（preflight 时布局尚未判定）。
+HOOK_SRC=()
+for hook in pre-commit pre-push post-commit; do
+	HOOK_SRC["$hook"]="$(resolve_src hook "$hook" || true)"
+done
+
 # ── 输出helpers ───────────────────────────────────────────────────────────
 
 CREATED=0
@@ -404,22 +422,44 @@ fail_missing_unique() {
 	FAILED_PATHS+=("${dest#"${TARGET_DIR}"/}")
 }
 
-# create_hook <目标绝对路径> <模板源>
-# tooling 布局：.git/hooks 产物做一次 bin/trio- -> tooling/bin/trio- 替换；
+# render_payload <源> <输出>
+# R1：唯一渲染函数。tooling 布局把 bin/trio- 渲染为 tooling/bin/trio-；
 # 已处于 tooling/ 前缀下的 token 用占位符保护，保证幂等（无 tooling/tooling）。
-# bin 布局：产物与模板逐字节相同。
-create_hook() {
-	local dest="$1" src="$2" tmp mark=$'\001'
+# bin 布局零渲染（逐字节复制）。
+render_payload() {
+	local src="$1" out="$2" mark=$'\001'
 	if [[ "$LAYOUT" == "tooling" ]]; then
-		tmp="$(mktemp)"
 		sed -E -e "s#tooling/bin/trio-#${mark}#g" \
 			-e 's#(^|[^A-Za-z0-9_.-])bin/trio-#\1tooling/bin/trio-#g' \
-			-e "s#${mark}#tooling/bin/trio-#g" "$src" >"$tmp"
-		create_file "$dest" "$tmp" "755" 1
-		rm -f "$tmp"
+			-e "s#${mark}#tooling/bin/trio-#g" "$src" >"$out"
 	else
-		create_file "$dest" "$src" "755" 1
+		cp "$src" "$out"
 	fi
+}
+
+# create_rendered <目标绝对路径> <源文件> <权限> [always_overwrite]
+# 先渲染、后比对/安装（AHEAD 与 --force 都针对渲染结果）。
+create_rendered() {
+	local dest="$1" src="$2" mode="${3:-644}" always="${4:-0}" tmp
+	tmp="$(mktemp)"
+	render_payload "$src" "$tmp"
+	create_file "$dest" "$tmp" "$mode" "$always"
+	rm -f "$tmp"
+}
+
+# create_ahead_rendered <目标绝对路径> <源文件> <权限>
+create_ahead_rendered() {
+	local dest="$1" src="$2" mode="${3:-644}" tmp
+	tmp="$(mktemp)"
+	render_payload "$src" "$tmp"
+	create_ahead "$dest" "$tmp" "$mode"
+	rm -f "$tmp"
+}
+
+# create_hook <目标绝对路径> <模板源>
+# .git/hooks 产物经统一 render_payload 渲染，tooling 布局替换、bin 布局逐字节同源。
+create_hook() {
+	create_rendered "$1" "$2" "755" 1
 }
 
 # create_policy_eval <目标绝对路径> <源>
@@ -511,7 +551,7 @@ fi
 # ── 1. 契约目录 ───────────────────────────────────────────────────────────
 
 printf '[1/6] 工作目录\n'
-for dir in docs/task docs/architecture src tests; do
+for dir in docs/task docs/architecture src "$TESTS_REL"; do
 	create_dir "${TARGET_DIR}/${dir}"
 done
 
@@ -524,7 +564,7 @@ for role in arch dev test; do
 	if [[ -z "$src" ]]; then
 		fail_missing_src "$dest" profiles "${role}.rules.md"
 	else
-		create_file "$dest" "$src"
+		create_rendered "$dest" "$src" "644"
 	fi
 done
 POLICY_SRC="${SCAFFOLD_ROOT}/.omp/trio/policy.txt"
@@ -537,23 +577,33 @@ fi
 # ── 3. 任务产物模板 ───────────────────────────────────────────────────────
 
 printf '\n[3/6] 任务产物模板\n'
-TPL_DIR="$(resolve_glob_dir tpl || true)"
-if [[ -z "$TPL_DIR" ]]; then
-	fail_missing_src "${TARGET_DIR}/.omp/trio/templates/" tpl
-else
+# R2：逐文件候选，源区与安装面名册并集去重；单件全缺只失败该件。
+declare -A TPL_SEEN=()
+for tpl_dir in "${SCAFFOLD_ROOT}/templates" "${SCAFFOLD_ROOT}/.omp/trio/templates"; do
+	[[ -d "$tpl_dir" ]] || continue
 	while IFS= read -r template; do
-		if [[ "$(basename "$template")" == "board.template.md" ]]; then
-			create_ahead "${TARGET_DIR}/.omp/trio/templates/board.template.md" "$template" "644"
-		else
-			create_file "${TARGET_DIR}/.omp/trio/templates/$(basename "$template")" "$template" "644" 1
-		fi
-	done < <(compgen -G "${TPL_DIR}/*.md")
+		TPL_SEEN["$(basename "$template")"]=1
+	done < <(compgen -G "${tpl_dir}/*.md")
+done
+if [[ ${#TPL_SEEN[@]} -eq 0 ]]; then
+	fail_missing_src "${TARGET_DIR}/.omp/trio/templates/" tpl
 fi
+for name in $(printf '%s\n' "${!TPL_SEEN[@]}" | LC_ALL=C sort); do
+	dest="${TARGET_DIR}/.omp/trio/templates/${name}"
+	template="$(resolve_src tpl "$name" || true)"
+	if [[ -z "$template" ]]; then
+		fail_missing_src "$dest" tpl "$name"
+	elif [[ "$name" == "board.template.md" ]]; then
+		create_ahead_rendered "$dest" "$template" "644"
+	else
+		create_rendered "$dest" "$template" "644" 1
+	fi
+done
 REPLY_SRC="${SCAFFOLD_ROOT}/docs/REPLY-CONVENTIONS.md"
 if [[ ! -f "$REPLY_SRC" ]]; then
 	fail_missing_unique "${TARGET_DIR}/docs/REPLY-CONVENTIONS.md" "$REPLY_SRC"
 else
-	create_ahead "${TARGET_DIR}/docs/REPLY-CONVENTIONS.md" "$REPLY_SRC" "644"
+	create_ahead_rendered "${TARGET_DIR}/docs/REPLY-CONVENTIONS.md" "$REPLY_SRC" "644"
 fi
 
 # ── 4. 进程内写门禁 hook + 会话名扩展 ─────────────────────────────────────
@@ -587,7 +637,7 @@ for hook in pre-commit pre-push post-commit; do
 		continue
 	fi
 	if [[ "$LAYOUT" == "tooling" ]]; then
-		create_file "${TARGET_DIR}/${HOOK_SRC_REL}/${hook}" "$src" "755" 1
+		create_rendered "${TARGET_DIR}/${HOOK_SRC_REL}/${hook}" "$src" "755" 1
 	fi
 	create_hook "${GIT_DIR_ABS}/hooks/${hook}" "$src"
 done
@@ -612,7 +662,7 @@ if [[ -z "$TESTS_SRC_DIR" ]]; then
 else
 	while IFS= read -r test_file; do
 		create_file "${TARGET_DIR}/${TESTS_REL}/$(basename "$test_file")" "$test_file" "644" 1
-	done < <(compgen -G "${TESTS_SRC_DIR}/*.test.mjs")
+	done < <(compgen -G "${TESTS_SRC_DIR}/*.mjs")
 fi
 
 # ── 汇总 ───────────────────────────────────────────────────────────────────

@@ -1,4 +1,5 @@
 /**
+ * @trio-suite scaffold-only —— 仅上游脚手架仓适用；安装仓由 selftest 跳过。
  * trio-mutation-check.test.mjs —— TASK-007 AC-12 mutation 质量门回归
  *
  * 在临时 git 仓库造两提交 diff，真实调用 bin/trio-mutation-check.mjs：

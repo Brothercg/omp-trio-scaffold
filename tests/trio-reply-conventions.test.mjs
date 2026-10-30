@@ -1,4 +1,5 @@
 /**
+ * @trio-suite scaffold-only —— 仅上游脚手架仓适用；安装仓由 selftest 跳过。
  * trio-reply-conventions.test.mjs —— 回复规范落地（TASK-003）契约测试
  *
  * 锁定 spec v3（docs/task/TASK-003-2026-10-26-回复规范落地/arch-20261026-1248-spec.md）

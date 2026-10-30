@@ -1,4 +1,5 @@
 /**
+ * @trio-suite scaffold-only —— 仅上游脚手架仓适用；安装仓由 selftest 跳过。
  * trio-align.test.mjs —— 下游对齐工具行为测试
  *
  * 覆盖 TASK-004 spec AC-1..AC-6：

@@ -14,14 +14,33 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
+import { pathToFileURL } from "node:url";
 import assert from "node:assert/strict";
 
-import registerGuard from "../.omp/hooks/pre/trio-guard.ts";
+import { payload, projectRoot } from "./_layout.mjs";
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.resolve(HERE, "..");
+const ROOT = projectRoot();
+const GUARD = payload(".omp/hooks/pre/trio-guard.ts");
+assert.ok(GUARD, "未找到 trio-guard.ts");
+const { default: registerGuard } = await import(pathToFileURL(GUARD).href);
+const PRECOMMIT = payload("tooling/hooks/pre-commit", "templates/pre-commit", ".git/hooks/pre-commit");
+assert.ok(PRECOMMIT, "未找到 pre-commit");
 const POLICY = fs.readFileSync(path.join(ROOT, ".omp", "trio", "policy.txt"), "utf8");
+
+// 夹具内同时放 bin/ 与 tooling/bin/ 判定器，兼容源模板与渲染后 hook。
+function installTools(repo) {
+	const guard = payload(".omp/hooks/pre/trio-guard.ts");
+	fs.mkdirSync(path.join(repo, ".omp/hooks/pre"), { recursive: true });
+	if (guard) fs.copyFileSync(guard, path.join(repo, ".omp/hooks/pre/trio-guard.ts"));
+	for (const dirRel of ["bin", "tooling/bin"]) {
+		for (const tool of ["trio-policy-eval.mjs", "trio-check-report.mjs"]) {
+			const src = payload(`tooling/bin/${tool}`, `bin/${tool}`);
+			if (!src) continue;
+			fs.mkdirSync(path.join(repo, dirRel), { recursive: true });
+			fs.copyFileSync(src, path.join(repo, dirRel, tool));
+		}
+	}
+}
 
 // TASK-007 窗口（ADR-0003）：窗口内 arch 对七个精确执行件放行；回收后 deny * 恢复。
 const WINDOW_ACTIVE = POLICY.includes("BEGIN TASK-007");
@@ -422,6 +441,7 @@ await check("D/AC-5 guard 判定与 pre-commit 判定对同一路径矩阵结论
 				execFileSync("git", ["init", "-q"], { cwd: repo });
 				fs.mkdirSync(path.join(repo, ".omp", "trio"), { recursive: true });
 				fs.writeFileSync(path.join(repo, ".omp", "trio", "policy.txt"), `${tc.policy}\n# gate-version: 1\n`);
+				installTools(repo);
 				// 待判文件造出 staging 面：写入 tc.path 同形态目录
 				const stagedPath = tc.path;
 				fs.mkdirSync(path.dirname(path.join(repo, stagedPath)), { recursive: true });
@@ -430,7 +450,7 @@ await check("D/AC-5 guard 判定与 pre-commit 判定对同一路径矩阵结论
 				let preCommitCode = 0;
 				try {
 					execFileSync(
-						"bash", [path.join(ROOT, "templates", "pre-commit")],
+						"bash", [PRECOMMIT],
 						{ cwd: repo, env: { ...process.env, TRIO_ROLE: tc.role }, stdio: "pipe" },
 					);
 				} catch (er) {
@@ -453,9 +473,10 @@ await check("D/AC-5 guard 判定与 pre-commit 判定对同一路径矩阵结论
 		execFileSync("git", ["init", "-q"], { cwd: repo });
 		fs.writeFileSync(path.join(repo, "f.txt"), "x");
 		execFileSync("git", ["add", "f.txt"], { cwd: repo });
+		installTools(repo);
 		let code = 0;
 		try {
-			execFileSync("bash", [path.join(ROOT, "templates", "pre-commit")], {
+			execFileSync("bash", [PRECOMMIT], {
 				cwd: repo,
 				env: { ...process.env, TRIO_ROLE: "dev" },
 				stdio: "pipe",

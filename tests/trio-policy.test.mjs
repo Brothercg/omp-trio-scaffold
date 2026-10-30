@@ -1,4 +1,5 @@
 /**
+ * @trio-suite scaffold-only —— 仅上游脚手架仓适用；安装仓由 selftest 跳过。
  * trio-policy.test.mjs —— 门禁策略的回归测试
  *
  * 这是**永久测试**：它锁定「什么角色能写什么路径」这条契约。
@@ -512,8 +513,20 @@ check("init-agent.sh 部署报告校验器", () => {
 });
 
 check("init-agent.sh 部署全部模板", () => {
-	const script = fs.readFileSync(path.join(SCAFFOLD_ROOT, "bin", "init-agent.sh"), "utf8");
-	assert.match(script, /templates\/\*\.md/, "未批量部署模板");
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "trio-tpl-"));
+	try {
+		execFileSync("git", ["init", "-q"], { cwd: dir });
+		execFileSync("bash", [path.join(SCAFFOLD_ROOT, "bin", "init-agent.sh"), dir], { stdio: "pipe" });
+		for (const name of fs.readdirSync(TEMPLATES)) {
+			if (!name.endsWith(".md")) continue;
+			assert.ok(
+				fs.existsSync(path.join(dir, ".omp/trio/templates", name)),
+				`未部署模板 ${name}`,
+			);
+		}
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
 });
 
 check("pre-commit 用 --show-toplevel 定位项目根（worktree 兼容）", () => {
