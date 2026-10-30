@@ -6,6 +6,33 @@
 格式：每版本一节，条目按「新增 / 修改 / 修复 / 弃用」分组，注明关联任务或 ADR。
 -->
 
+## v0.9.3 — 2026-10-30
+
+TASK-012：tooling 布局安装面渲染与测试面自适应（patch）。
+
+### 修复
+- R1 唯一渲染函数：`render_payload` 覆盖 `.omp/trio/templates/*.md`、
+  `.omp/trio/{arch,dev,test}.rules.md`、`docs/REPLY-CONVENTIONS.md`、
+  `tooling/hooks/*`、`.git/hooks/*`；渲染在前、对比在后，AHEAD/`--force` 均针对渲染结果；
+  bin 布局零渲染，落点逐字节等于源。
+- R2 模板逐文件候选：`templates/<name>` → `.omp/trio/templates/<name>`，名册并集去重；
+  单件缺源逐件 `失败 …：源缺失 …`，其余继续。
+- R3 执行件源序布局优先（修订 TASK-011 S1）：tooling 下 `tooling/{bin,tests,hooks}`
+  优先；`--force` 重装不再倒灌根 `tests/` 旧夹具、不再把已适配 hook 打回。
+- R8 工作目录按布局创建 `$TESTS_REL`；`[6/6]` glob `*.mjs` 携带 `tests/_layout.mjs`。
+
+### 新增
+- `tests/_layout.mjs`：`projectRoot()` / `payload()` / `toolPath()` 运行期布局解析。
+- selftest 按脚本自身布局选择套件目录，另一目录打印 `忽略 …` 提示；
+  `@trio-suite scaffold-only` 套件在安装仓打印 `跳过 …`（上游 authoring 仓仍执行）。
+
+### 测试
+- 6 个可移植套件改用地标/候选解析，bin 与 tooling 安装面均可运行；
+  5 个脚手架专有套件加 scaffold-only 标记。
+- `trio-init-layout` 增 AC-1/3/4/5/8/9 断言（26 项）。
+- 全量 11 套件 450 项、上游 `trio-selftest.sh --fast` 28 项、
+  tooling 安装面 selftest 22 项 + 5 项跳过，均 0 失败。
+
 ## v0.9.2 — 2026-10-30
 
 TASK-011：反馈 ⑬，`init-agent.sh` 自托管源侧解析（patch）。
