@@ -14,7 +14,9 @@
  */
 
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 
@@ -443,15 +445,26 @@ check("start-agent.sh 使用 qa → test.rules.md 映射", () => {
 	assert.match(script, /qa\)\s*ROLE_BRIEF="test"/, "start-agent.sh 缺少 qa → test 的映射");
 });
 
-check("init-agent.sh 部署 arch.rules.md 到 .omp/trio/", () => {
-	const script = fs.readFileSync(path.join(SCAFFOLD_ROOT, "bin", "init-agent.sh"), "utf8");
-	assert.match(script, /\.omp\/trio\/arch\.rules\.md/, "init-agent.sh 未部署 arch.rules.md");
-});
+function deployedRules(name) {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "trio-rules-"));
+	try {
+		execFileSync("git", ["init", "-q"], { cwd: dir });
+		execFileSync("bash", [path.join(SCAFFOLD_ROOT, "bin", "init-agent.sh"), dir], { stdio: "pipe" });
+		const dest = path.join(dir, ".omp", "trio", name);
+		assert.ok(fs.existsSync(dest), `init-agent.sh 未部署 ${name}`);
+		assert.deepEqual(
+			fs.readFileSync(dest),
+			fs.readFileSync(path.join(SCAFFOLD_ROOT, "profiles", name)),
+			`${name} 与 profiles 源不一致`,
+		);
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+}
 
-check("init-agent.sh 部署 test.rules.md 到 .omp/trio/", () => {
-	const script = fs.readFileSync(path.join(SCAFFOLD_ROOT, "bin", "init-agent.sh"), "utf8");
-	assert.match(script, /\.omp\/trio\/test\.rules\.md/, "init-agent.sh 未部署 test.rules.md");
-});
+check("init-agent.sh 部署 arch.rules.md 到 .omp/trio/", () => deployedRules("arch.rules.md"));
+
+check("init-agent.sh 部署 test.rules.md 到 .omp/trio/", () => deployedRules("test.rules.md"));
 
 check("已不存在 profiles/pm.rules.md（旧角色已改名）", () => {
 	assert.ok(!fs.existsSync(path.join(SCAFFOLD_PROFILES, "pm.rules.md")), "profiles/pm.rules.md 仍存在");

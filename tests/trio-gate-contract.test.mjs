@@ -136,7 +136,11 @@ checkIfNotChild("AC-8a selftest --fast 实际执行全部现存套件（自动�
 
 checkIfNotChild("AC-8b init-agent.sh 部署全部 tests/*.test.mjs（glob 循环）", () => {
 	const script = read("bin", "init-agent.sh");
-	assert.match(script, /for\s+test_file\s+in\s+\S*(tests|\\tests)\/\*\.test\.mjs/, "init-agent.sh 未按 glob 部署测试");
+	assert.match(
+		script,
+		/(for\s+test_file\s+in\s+\S*(tests|\\tests)\/\*\.test\.mjs|compgen\s+-G\s+"\$\{TESTS_SRC_DIR\}\/\*\.test\.mjs")/,
+		"init-agent.sh 未按 glob 部署测试",
+	);
 	// 实际部署验证：临时 git 仓库 init，断言 4 个测试文件全部落地
 	const target = fs.mkdtempSync(path.join(os.tmpdir(), "ac8-init-"));
 	try {

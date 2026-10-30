@@ -357,7 +357,7 @@ check("AC-8 align 无 policy 目录 → exit 1 + 无法定位仓库根", () => {
 	}
 });
 
-check("AC-8c init-agent 在 tooling/bin/ 自定位根（反馈 ⑫）", () => {
+check("AC-8c init-agent 在 tooling/bin/ 自定位根（反馈 ⑫；缺源按 S2 报失败）", () => {
 	const srcRoot = makeSourceRoot();
 	const target = newRepo();
 	try {
@@ -370,9 +370,12 @@ check("AC-8c init-agent 在 tooling/bin/ 自定位根（反馈 ⑫）", () => {
 			encoding: "utf8",
 			env: ENV,
 		});
-		assert.equal(r.status, 0, `${r.stdout}\n${r.stderr}`);
+		// TASK-011 S2/S3：源不完整时 fail-closed，但根自定位必须成功。
+		assert.equal(r.status, 1, `${r.stdout}\n${r.stderr}`);
+		assert.ok(!r.stderr.includes("无法定位仓库根"), `根误判：${r.stderr}`);
 		assert.ok(!r.stderr.includes("缺少 templates/pre-commit"), `根误判：${r.stderr}`);
-		assert.match(r.stdout, /干跑：/u);
+		assert.match(r.stdout, /布局：/u);
+		assert.match(r.stdout, /源缺失/u);
 	} finally {
 		fs.rmSync(srcRoot, { recursive: true, force: true });
 		fs.rmSync(target, { recursive: true, force: true });
@@ -424,6 +427,179 @@ check("AC-9 bin 布局：套件解析到 tests/、校验器可用", () => {
 		assert.ok(!r.stdout.includes("报告校验器缺失"), "校验器应解析到 bin");
 	} finally {
 		fs.rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+// ── TASK-011 自托管源解析（AC-1..AC-5）─────────────────────────────────────
+
+console.log("\n[TASK-011 自托管源解析]");
+
+const RULES = ["arch.rules.md", "dev.rules.md", "test.rules.md"];
+const TOOLS = ["trio-check-report.mjs", "trio-policy-eval.mjs", "trio-selftest.sh"];
+
+function copyInto(src, dest) {
+	fs.mkdirSync(path.dirname(dest), { recursive: true });
+	fs.copyFileSync(src, dest);
+}
+
+/**
+ * 自托管夹具：源树按下游等价形态布置。
+ * withTemplatesHooks=true 时保留 templates/pre-commit|pre-push（无 post-commit），
+ * 用于复现「单件缺失回退」；false 时只剩 tooling/hooks。
+ */
+function makeSelfHosted({ withTemplatesHooks = true, withTemplatesMd = true } = {}) {
+	const root = newRepo();
+	copyInto(path.join(ROOT, "bin/init-agent.sh"), path.join(root, "tooling/bin/init-agent.sh"));
+	for (const tool of TOOLS) {
+		copyInto(path.join(ROOT, "bin", tool), path.join(root, "tooling/bin", tool));
+	}
+	for (const hook of ["pre-commit", "pre-push", "post-commit"]) {
+		copyInto(path.join(TEMPLATES, hook), path.join(root, "tooling/hooks", hook));
+	}
+	fs.mkdirSync(path.join(root, "tooling/tests"), { recursive: true });
+	fs.writeFileSync(path.join(root, "tooling/tests/dummy.test.mjs"), 'console.log("ok");\n');
+	for (const rule of RULES) {
+		copyInto(path.join(ROOT, ".omp/trio", rule), path.join(root, ".omp/trio", rule));
+	}
+	copyInto(path.join(ROOT, ".omp/trio/policy.txt"), path.join(root, ".omp/trio/policy.txt"));
+	for (const name of fs.readdirSync(path.join(ROOT, ".omp/trio/templates"))) {
+		if (!name.endsWith(".md")) continue;
+		copyInto(
+			path.join(ROOT, ".omp/trio/templates", name),
+			path.join(root, ".omp/trio/templates", name),
+		);
+	}
+	copyInto(path.join(ROOT, "docs/REPLY-CONVENTIONS.md"), path.join(root, "docs/REPLY-CONVENTIONS.md"));
+	copyInto(
+		path.join(ROOT, ".omp/hooks/pre/trio-guard.ts"),
+		path.join(root, ".omp/hooks/pre/trio-guard.ts"),
+	);
+	copyInto(
+		path.join(ROOT, ".omp/extensions/trio-session-name.ts"),
+		path.join(root, ".omp/extensions/trio-session-name.ts"),
+	);
+	if (withTemplatesHooks) {
+		fs.mkdirSync(path.join(root, "templates"), { recursive: true });
+		copyInto(path.join(TEMPLATES, "pre-commit"), path.join(root, "templates/pre-commit"));
+		copyInto(path.join(TEMPLATES, "pre-push"), path.join(root, "templates/pre-push"));
+	}
+	if (withTemplatesMd) {
+		fs.mkdirSync(path.join(root, "templates"), { recursive: true });
+		for (const name of fs.readdirSync(TEMPLATES)) {
+			if (!name.endsWith(".md")) continue;
+			copyInto(path.join(TEMPLATES, name), path.join(root, "templates", name));
+		}
+	}
+	return root;
+}
+
+function runSelf(root, args) {
+	return spawnSync("bash", [path.join(root, "tooling/bin/init-agent.sh"), ...args], {
+		cwd: root,
+		encoding: "utf8",
+		env: ENV,
+	});
+}
+
+check("AC-1 自托管 dry-run 全流程：exit 0、六段、汇总、无 sed 报错", () => {
+	const root = makeSelfHosted();
+	try {
+		const before = snap(root);
+		const r = runSelf(root, [".", "--dry-run"]);
+		const out = `${r.stdout}${r.stderr}`;
+		assert.equal(r.status, 0, out);
+		for (const section of ["[1/6]", "[2/6]", "[3/6]", "[4/6]", "[5/6]", "[6/6]"]) {
+			assert.ok(out.includes(section), `缺段落 ${section}`);
+		}
+		assert.match(out, /干跑：将新建 \d+ 项，将覆盖 \d+ 项，将跳过 \d+ 项，将保留 \d+ 项（零写入）/u);
+		assert.ok(!out.includes("sed:"), "不得出现 sed 报错");
+		assert.deepEqual(snap(root), before, "dry-run 零写入");
+	} finally {
+		fs.rmSync(root, { recursive: true, force: true });
+	}
+});
+
+check("AC-2 单件 hook 缺失回退 tooling/hooks；产物无双重前缀", () => {
+	const root = makeSelfHosted();
+	const marker = "# MARKER-TOOLING-POST-COMMIT\n";
+	try {
+		fs.writeFileSync(path.join(root, "tooling/hooks/post-commit"), marker);
+		const dry = runSelf(root, [".", "--dry-run"]);
+		assert.equal(dry.status, 0, `${dry.stdout}${dry.stderr}`);
+		assert.match(dry.stdout, /将创建  \.git\/hooks\/post-commit/u);
+
+		const real = runSelf(root, [".", "--force"]);
+		assert.equal(real.status, 0, `${real.stdout}${real.stderr}`);
+		const product = fs.readFileSync(path.join(root, ".git/hooks/post-commit"), "utf8");
+		assert.equal(product, marker, "post-commit 应逐字节取 tooling/hooks 源");
+		assert.ok(!product.includes("tooling/tooling"), "不得双重前缀");
+	} finally {
+		fs.rmSync(root, { recursive: true, force: true });
+	}
+});
+
+check("AC-3 仅自托管源：模板/简报/工具/测试落点 cmp -s", () => {
+	const src = makeSelfHosted({ withTemplatesHooks: false, withTemplatesMd: false });
+	const target = newRepo();
+	try {
+		const r = spawnSync("bash", [path.join(src, "tooling/bin/init-agent.sh"), target, "--layout", "tooling"], {
+			cwd: src,
+			encoding: "utf8",
+			env: ENV,
+		});
+		assert.equal(r.status, 0, `${r.stdout}${r.stderr}`);
+		const pairs = [
+			["tooling/bin/trio-check-report.mjs", "tooling/bin/trio-check-report.mjs"],
+			["tooling/tests/dummy.test.mjs", "tooling/tests/dummy.test.mjs"],
+			[".omp/trio/arch.rules.md", ".omp/trio/arch.rules.md"],
+			[".omp/trio/templates/board.template.md", ".omp/trio/templates/board.template.md"],
+		];
+		for (const [rel, srcRel] of pairs) {
+			assert.deepEqual(
+				fs.readFileSync(path.join(target, rel)),
+				fs.readFileSync(path.join(src, srcRel)),
+				`${rel} 应与自托管源逐字节相同`,
+			);
+		}
+	} finally {
+		fs.rmSync(src, { recursive: true, force: true });
+		fs.rmSync(target, { recursive: true, force: true });
+	}
+});
+
+check("AC-4 hooks 三件源全缺 → exit 1、未找到 hooks 源、零写入", () => {
+	const root = makeSelfHosted();
+	try {
+		for (const hook of ["pre-commit", "pre-push", "post-commit"]) {
+			fs.rmSync(path.join(root, "tooling/hooks", hook));
+			fs.rmSync(path.join(root, "templates", hook), { force: true });
+		}
+		const before = snap(root);
+		const r = runSelf(root, [".", "--dry-run"]);
+		assert.equal(r.status, 1);
+		assert.match(r.stderr, /未找到 hooks 源/u);
+		assert.deepEqual(snap(root), before, "缺源干跑零写入");
+	} finally {
+		fs.rmSync(root, { recursive: true, force: true });
+	}
+});
+
+check("AC-5 已含 tooling/bin 前缀的 hook 源 → 产物 cmp 源、无 tooling/tooling", () => {
+	const root = makeSelfHosted();
+	const source = '#!/usr/bin/env bash\nreadonly VALIDATOR_REL="tooling/bin/trio-check-report.mjs"\n';
+	try {
+		fs.writeFileSync(path.join(root, "tooling/hooks/post-commit"), source);
+		const r = runSelf(root, [".", "--force"]);
+		assert.equal(r.status, 0, `${r.stdout}${r.stderr}`);
+		const product = fs.readFileSync(path.join(root, ".git/hooks/post-commit"), "utf8");
+		assert.equal(product, source, "已含前缀的源应逐字节保留");
+		assert.ok(!product.includes("tooling/tooling"), "不得出现 tooling/tooling");
+		for (const hook of ["pre-commit", "pre-push"]) {
+			const text = fs.readFileSync(path.join(root, ".git/hooks", hook), "utf8");
+			assert.ok(!text.includes("tooling/tooling"), `${hook} 不得出现 tooling/tooling`);
+		}
+	} finally {
+		fs.rmSync(root, { recursive: true, force: true });
 	}
 });
 

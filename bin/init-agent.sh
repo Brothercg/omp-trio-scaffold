@@ -51,6 +51,65 @@ resolve_root() {
 SCAFFOLD_ROOT="$(resolve_root "$SELF_DIR")" || exit 1
 readonly SCAFFOLD_ROOT
 
+# ── 源侧解析（TASK-011 / spec §3 S1）───────────────────────────────────────
+# 自托管模式下源件分布在 tooling/{bin,tests,hooks} 与 .omp/trio/；
+# 逐载荷独立回退，不要求整棵树同源。
+
+src_candidates() {
+	local kind="$1" name="${2:-}"
+	case "$kind" in
+		hook)
+			printf '%s\n' "${SCAFFOLD_ROOT}/templates/${name}" "${SCAFFOLD_ROOT}/tooling/hooks/${name}"
+			;;
+		tool)
+			printf '%s\n' "${SCAFFOLD_ROOT}/bin/${name}" "${SCAFFOLD_ROOT}/tooling/bin/${name}"
+			;;
+		tests)
+			printf '%s\n' "${SCAFFOLD_ROOT}/tests/*.test.mjs" "${SCAFFOLD_ROOT}/tooling/tests/*.test.mjs"
+			;;
+		tpl)
+			printf '%s\n' "${SCAFFOLD_ROOT}/templates/*.md" "${SCAFFOLD_ROOT}/.omp/trio/templates/*.md"
+			;;
+		profiles)
+			printf '%s\n' "${SCAFFOLD_ROOT}/profiles/${name}" "${SCAFFOLD_ROOT}/.omp/trio/${name}"
+			;;
+	esac
+}
+
+# resolve_src <kind> [name] -> 首个存在的文件路径；无则空、返回 1。
+resolve_src() {
+	local kind="$1" name="${2:-}" candidate
+	while IFS= read -r candidate; do
+		if [[ -f "$candidate" ]]; then
+			printf '%s' "$candidate"
+			return 0
+		fi
+	done < <(src_candidates "$kind" "$name")
+	return 1
+}
+
+# resolve_glob_dir <tests|tpl> -> 首个含匹配文件的目录；无则返回 1。
+resolve_glob_dir() {
+	local kind="$1" pattern dir
+	case "$kind" in
+		tests) pattern='*.test.mjs' ;;
+		tpl) pattern='*.md' ;;
+		*) return 1 ;;
+	esac
+	local -a candidates=()
+	case "$kind" in
+		tests) candidates=("${SCAFFOLD_ROOT}/tests" "${SCAFFOLD_ROOT}/tooling/tests") ;;
+		tpl) candidates=("${SCAFFOLD_ROOT}/templates" "${SCAFFOLD_ROOT}/.omp/trio/templates") ;;
+	esac
+	for dir in "${candidates[@]}"; do
+		if compgen -G "${dir}/${pattern}" >/dev/null; then
+			printf '%s' "$dir"
+			return 0
+		fi
+	done
+	return 1
+}
+
 # ── 参数解析 ───────────────────────────────────────────────────────────────
 
 TARGET_DIR=""
@@ -145,8 +204,18 @@ fi
 
 TARGET_DIR="$(cd "$TARGET_DIR" && pwd)"
 
-if [[ ! -f "${SCAFFOLD_ROOT}/templates/pre-commit" ]]; then
-	printf 'init-agent.sh: 脚手架不完整，缺少 templates/pre-commit（源目录：%s）\n' "$SCAFFOLD_ROOT" >&2
+# S2：hooks 三件候选全缺才中止；单件缺失走逐件失败，不中断整步。
+declare -A HOOK_SRC=()
+missing_hooks=0
+for hook in pre-commit pre-push post-commit; do
+	HOOK_SRC["$hook"]="$(resolve_src hook "$hook" || true)"
+	if [[ -z "${HOOK_SRC[$hook]}" ]]; then
+		missing_hooks=$((missing_hooks + 1))
+	fi
+done
+if [[ "$missing_hooks" -eq 3 ]]; then
+	printf 'init-agent.sh: 脚手架不完整：未找到 hooks 源（候选：%s / %s）\n' \
+		"${SCAFFOLD_ROOT}/templates" "${SCAFFOLD_ROOT}/tooling/hooks" >&2
 	exit 1
 fi
 
@@ -312,14 +381,40 @@ create_ahead() {
 	return 0
 }
 
+# fail_missing_src <目标绝对路径> <kind> [name]
+# S2：缺源逐件失败，打印候选列表，继续处理其余件。
+fail_missing_src() {
+	local dest="$1" kind="$2" name="${3:-}"
+	local -a candidates=()
+	local joined
+	while IFS= read -r candidate; do
+		candidates+=("$candidate")
+	done < <(src_candidates "$kind" "$name")
+	joined="$(IFS=' / '; printf '%s' "${candidates[*]}")"
+	printf '  失败  %s：源缺失 %s\n' "${dest#"${TARGET_DIR}"/}" "$joined"
+	FAILED=$((FAILED + 1))
+	FAILED_PATHS+=("${dest#"${TARGET_DIR}"/}")
+}
+
+# fail_missing_unique <目标绝对路径> <源路径>
+fail_missing_unique() {
+	local dest="$1" src="$2"
+	printf '  失败  %s：源缺失 %s\n' "${dest#"${TARGET_DIR}"/}" "$src"
+	FAILED=$((FAILED + 1))
+	FAILED_PATHS+=("${dest#"${TARGET_DIR}"/}")
+}
+
 # create_hook <目标绝对路径> <模板源>
-# tooling 布局：.git/hooks 产物对模板做一次 bin/trio- -> tooling/bin/trio- 替换；
+# tooling 布局：.git/hooks 产物做一次 bin/trio- -> tooling/bin/trio- 替换；
+# 已处于 tooling/ 前缀下的 token 用占位符保护，保证幂等（无 tooling/tooling）。
 # bin 布局：产物与模板逐字节相同。
 create_hook() {
-	local dest="$1" src="$2" tmp
+	local dest="$1" src="$2" tmp mark=$'\001'
 	if [[ "$LAYOUT" == "tooling" ]]; then
 		tmp="$(mktemp)"
-		sed 's#bin/trio-#tooling/bin/trio-#g' "$src" >"$tmp"
+		sed -E -e "s#tooling/bin/trio-#${mark}#g" \
+			-e 's#(^|[^A-Za-z0-9_.-])bin/trio-#\1tooling/bin/trio-#g' \
+			-e "s#${mark}#tooling/bin/trio-#g" "$src" >"$tmp"
 		create_file "$dest" "$tmp" "755" 1
 		rm -f "$tmp"
 	else
@@ -423,56 +518,102 @@ done
 # ── 2. .omp/trio/ 角色简报与写策略 ─────────────────────────────────────────
 
 printf '\n[2/6] 角色简报与写策略\n'
-create_file "${TARGET_DIR}/.omp/trio/arch.rules.md" "${SCAFFOLD_ROOT}/profiles/arch.rules.md"
-create_file "${TARGET_DIR}/.omp/trio/dev.rules.md" "${SCAFFOLD_ROOT}/profiles/dev.rules.md"
-create_file "${TARGET_DIR}/.omp/trio/test.rules.md" "${SCAFFOLD_ROOT}/profiles/test.rules.md"
-install_policy "${TARGET_DIR}/.omp/trio/policy.txt" "${SCAFFOLD_ROOT}/.omp/trio/policy.txt"
+for role in arch dev test; do
+	dest="${TARGET_DIR}/.omp/trio/${role}.rules.md"
+	src="$(resolve_src profiles "${role}.rules.md" || true)"
+	if [[ -z "$src" ]]; then
+		fail_missing_src "$dest" profiles "${role}.rules.md"
+	else
+		create_file "$dest" "$src"
+	fi
+done
+POLICY_SRC="${SCAFFOLD_ROOT}/.omp/trio/policy.txt"
+if [[ ! -f "$POLICY_SRC" ]]; then
+	fail_missing_unique "${TARGET_DIR}/.omp/trio/policy.txt" "$POLICY_SRC"
+else
+	install_policy "${TARGET_DIR}/.omp/trio/policy.txt" "$POLICY_SRC"
+fi
 
 # ── 3. 任务产物模板 ───────────────────────────────────────────────────────
 
 printf '\n[3/6] 任务产物模板\n'
-for template in "${SCAFFOLD_ROOT}"/templates/*.md; do
-	if [[ "$(basename "$template")" == "board.template.md" ]]; then
-		create_ahead "${TARGET_DIR}/.omp/trio/templates/board.template.md" "$template" "644"
-	else
-		create_file "${TARGET_DIR}/.omp/trio/templates/$(basename "$template")" "$template" "644" 1
-	fi
-done
-create_ahead "${TARGET_DIR}/docs/REPLY-CONVENTIONS.md" "${SCAFFOLD_ROOT}/docs/REPLY-CONVENTIONS.md" "644"
+TPL_DIR="$(resolve_glob_dir tpl || true)"
+if [[ -z "$TPL_DIR" ]]; then
+	fail_missing_src "${TARGET_DIR}/.omp/trio/templates/" tpl
+else
+	while IFS= read -r template; do
+		if [[ "$(basename "$template")" == "board.template.md" ]]; then
+			create_ahead "${TARGET_DIR}/.omp/trio/templates/board.template.md" "$template" "644"
+		else
+			create_file "${TARGET_DIR}/.omp/trio/templates/$(basename "$template")" "$template" "644" 1
+		fi
+	done < <(compgen -G "${TPL_DIR}/*.md")
+fi
+REPLY_SRC="${SCAFFOLD_ROOT}/docs/REPLY-CONVENTIONS.md"
+if [[ ! -f "$REPLY_SRC" ]]; then
+	fail_missing_unique "${TARGET_DIR}/docs/REPLY-CONVENTIONS.md" "$REPLY_SRC"
+else
+	create_ahead "${TARGET_DIR}/docs/REPLY-CONVENTIONS.md" "$REPLY_SRC" "644"
+fi
 
 # ── 4. 进程内写门禁 hook + 会话名扩展 ─────────────────────────────────────
 
 printf '\n[4/6] 进程内门禁与扩展（omp hook / extension）\n'
-create_file "${TARGET_DIR}/.omp/hooks/pre/trio-guard.ts" \
-	"${SCAFFOLD_ROOT}/.omp/hooks/pre/trio-guard.ts" "644" 1
+GUARD_SRC="${SCAFFOLD_ROOT}/.omp/hooks/pre/trio-guard.ts"
+if [[ ! -f "$GUARD_SRC" ]]; then
+	fail_missing_unique "${TARGET_DIR}/.omp/hooks/pre/trio-guard.ts" "$GUARD_SRC"
+else
+	create_file "${TARGET_DIR}/.omp/hooks/pre/trio-guard.ts" "$GUARD_SRC" "644" 1
+fi
 # 会话名扩展：session_start 时把会话名设为 TRIO_ROLE（仅当尚无标题）。
-create_file "${TARGET_DIR}/.omp/extensions/trio-session-name.ts" \
-	"${SCAFFOLD_ROOT}/.omp/extensions/trio-session-name.ts" "644" 1
+EXT_SRC="${SCAFFOLD_ROOT}/.omp/extensions/trio-session-name.ts"
+if [[ ! -f "$EXT_SRC" ]]; then
+	fail_missing_unique "${TARGET_DIR}/.omp/extensions/trio-session-name.ts" "$EXT_SRC"
+else
+	create_file "${TARGET_DIR}/.omp/extensions/trio-session-name.ts" "$EXT_SRC" "644" 1
+fi
 
 # ── 5. 提交前兜底门禁 + 报告校验器 ────────────────────────────────────────
 
 printf '\n[5/6] 提交前兜底门禁（git pre-commit）\n'
-if [[ "$LAYOUT" == "tooling" ]]; then
-	for hook in pre-commit pre-push post-commit; do
-		create_file "${TARGET_DIR}/${HOOK_SRC_REL}/${hook}" "${SCAFFOLD_ROOT}/templates/${hook}" "755" 1
-	done
-fi
 for hook in pre-commit pre-push post-commit; do
-	create_hook "${GIT_DIR_ABS}/hooks/${hook}" "${SCAFFOLD_ROOT}/templates/${hook}"
+	src="${HOOK_SRC[$hook]}"
+	if [[ -z "$src" ]]; then
+		if [[ "$LAYOUT" == "tooling" ]]; then
+			fail_missing_src "${TARGET_DIR}/${HOOK_SRC_REL}/${hook}" hook "$hook"
+		else
+			fail_missing_src "${GIT_DIR_ABS}/hooks/${hook}" hook "$hook"
+		fi
+		continue
+	fi
+	if [[ "$LAYOUT" == "tooling" ]]; then
+		create_file "${TARGET_DIR}/${HOOK_SRC_REL}/${hook}" "$src" "755" 1
+	fi
+	create_hook "${GIT_DIR_ABS}/hooks/${hook}" "$src"
 done
-create_file "${TARGET_DIR}/${TOOLS_REL}/trio-check-report.mjs" \
-	"${SCAFFOLD_ROOT}/bin/trio-check-report.mjs" "755" 1
-create_policy_eval "${TARGET_DIR}/${TOOLS_REL}/trio-policy-eval.mjs" \
-	"${SCAFFOLD_ROOT}/bin/trio-policy-eval.mjs"
-create_file "${TARGET_DIR}/${TOOLS_REL}/trio-selftest.sh" \
-	"${SCAFFOLD_ROOT}/bin/trio-selftest.sh" "755" 1
+for tool in trio-check-report.mjs trio-policy-eval.mjs trio-selftest.sh; do
+	dest="${TARGET_DIR}/${TOOLS_REL}/${tool}"
+	src="$(resolve_src tool "$tool" || true)"
+	if [[ -z "$src" ]]; then
+		fail_missing_src "$dest" tool "$tool"
+	elif [[ "$tool" == "trio-policy-eval.mjs" ]]; then
+		create_policy_eval "$dest" "$src"
+	else
+		create_file "$dest" "$src" "755" 1
+	fi
+done
 
 # ── 6. 门禁回归测试 ───────────────────────────────────────────────────────
 
 printf '\n[6/6] 门禁回归测试\n'
-for test_file in "${SCAFFOLD_ROOT}"/tests/*.test.mjs; do
-	create_file "${TARGET_DIR}/${TESTS_REL}/$(basename "$test_file")" "$test_file" "644" 1
-done
+TESTS_SRC_DIR="$(resolve_glob_dir tests || true)"
+if [[ -z "$TESTS_SRC_DIR" ]]; then
+	fail_missing_src "${TARGET_DIR}/${TESTS_REL}/" tests
+else
+	while IFS= read -r test_file; do
+		create_file "${TARGET_DIR}/${TESTS_REL}/$(basename "$test_file")" "$test_file" "644" 1
+	done < <(compgen -G "${TESTS_SRC_DIR}/*.test.mjs")
+fi
 
 # ── 汇总 ───────────────────────────────────────────────────────────────────
 
@@ -486,6 +627,10 @@ else
 fi
 
 if [[ "$DRY_RUN" -eq 1 ]]; then
+	if [[ "$FAILED" -gt 0 ]]; then
+		printf '\n干跑中止：失败 %d 件（零写入）。\n' "$FAILED"
+		exit 1
+	fi
 	printf '\n干跑：将新建 %d 项，将覆盖 %d 项，将跳过 %d 项，将保留 %d 项（零写入）\n' \
 		"$PLAN_CREATE" "$PLAN_OVERWRITE" "$PLAN_SKIP" "$PLAN_KEEP"
 	exit 0
