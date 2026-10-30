@@ -614,7 +614,11 @@ cmp .omp/trio/policy.txt /path/to/project/.omp/trio/policy.txt
 ```
 
 四条全绿才算对齐完成。升级旧项目时重跑 `init-agent.sh`：执行件直接覆盖，
-`policy.txt` 有 diff 只提示、不覆盖。
+`policy.txt` 有 diff 只提示、不覆盖。升级后可用
+`~/projects/omp-trio-scaffold/bin/trio-install.sh --check` 复核——
+其完整性清单已覆盖全部注入源件（含 `templates/report.template.md`、
+`templates/post-commit`、`profiles/*.rules.md`、`bin/trio-align.sh`、
+`bin/trio-mutation-check.mjs` 等 7 项，粘贴件 B ⑨ 补齐），缺件即报。
 
 ---
 
