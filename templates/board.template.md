@@ -113,7 +113,11 @@ stateDiagram-v2
 
 | 编号 | 类型 | 描述 | 提出 | 待谁 | 起始时间 |
 |---|---|---|---|---|---|
-| B-1 | `blocked` / `waiting_user` | `<一句话>` | `DEV` | `ARCH` | `15:10` |
+| B-1 | `blocked` / `waiting_user` / `contract-gap` | `<一句话>` | `DEV` | `ARCH` | `15:10` |
+
+> 类型取值：`blocked`（技术/依赖缺口）/ `waiting_user`（待用户裁决或终验）/
+> `contract-gap`（契约缺口——挂起语义同 `waiting_user`，解铃人＝ARCH 裁决 + 用户确认）。
+> `contract-gap` 只是本表的类型第三值，**不是新状态**——状态机主链不动。
 
 > 同一任务连续修复 3 轮仍未全绿 → 必须停手，在此记 `blocked` 并写下四项：
 > 失败条目 / 已试修法 / 根因分歧 / 建议。
