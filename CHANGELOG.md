@@ -6,6 +6,32 @@
 格式：每版本一节，条目按「新增 / 修改 / 修复 / 弃用」分组，注明关联任务或 ADR。
 -->
 
+## 未发布
+
+粘贴件 B ①-⑨ 工装源反馈修订（2026-10-30；执行 = 人工逃生舱，工装账本独立立账）。
+
+### 新增
+- `templates/report.template.md` 强制「AC → 用例覆盖矩阵」段（逐条 AC 对应用例编号
+  或显式 SKIP + 理由 + 挂起登记）与「格式自检」段（含「格式自检优先」句，⑨附注）。
+- `templates/board.template.md`「阻塞/待裁决」类型列补 `contract-gap` 第三值
+  （挂起语义同 `waiting_user`，状态机主链不动）。
+- `bin/trio-install.sh` 完整性清单补 7 缺件（`templates/report.template.md`、
+  `templates/post-commit`、`profiles/*.rules.md` ×3、`bin/trio-align.sh`、
+  `bin/trio-mutation-check.mjs`）；README 升版段注明。
+
+### 修改
+- 三角色卡（`profiles/*.rules.md` ⇆ `.omp/trio/*.rules.md` 双份同步）按下游正本
+  `arch-20261029-1545-trio-role-prompts.md` §1/§2/§3 整版采纳 + 上游适配层：
+  执行序位与交接、验收双件、AC 编号独占；校验器路径勘回 `bin/`；白名单对齐
+  policy 真值面；`ADR-0001` 引用补「工装源」标注（同号不同物勿混读，⑤）；
+  双账本独立立账口径（工装账本与产品版本 / git tag 无对应关系，⑥）。
+- `templates/bug.template.md` 流转语义：复现脚本归 QA 独占、缺失不得置
+  `confirmed`（①）；置 `fixed` 须附 QA 验证凭据（双件指针，⑦）。
+
+### 修复
+- ⑧ 核对：guard 策略生效三点（快照失效 / 缺失 fail-closed / 归因 faithful）已同步，
+  凭据 `6ac8766`（+ `e16760d` / `03736bc` 加固），本批无代码改动。
+
 ## v0.7.0 — 2026-10-29
 
 回复结构内建（TASK-008）+ profiles ADR-0013 口径同步。
