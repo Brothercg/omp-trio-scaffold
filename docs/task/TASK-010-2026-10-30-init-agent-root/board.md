@@ -9,7 +9,7 @@
 | 工作树 / 分支 | 主工作树 / `main` |
 | 起始日期 | `2026-10-30` |
 | qa_report | `—` |
-| release_gate | `exempt(maintenance)` |
+| release_gate | `strict` |
 
 ## 2. 状态
 
@@ -22,6 +22,9 @@
 > 下游 `factor_synthesis` 反馈 ⑫：`init-agent.sh` 落 `tooling/bin/` 后把源目录算成
 > `tooling/`，`--dry-run` 报「缺少 templates/pre-commit」。用户直派维护补丁：
 > 只改根解析 + 补一条回归，不动 `--layout` / `--dry-run` 语义。
+
+> 历史：`v0.9.1` 发布时使用 `exempt(maintenance)` + `V-12`；发布后该字段退役为
+> `strict`，避免旧豁免继续全局放行后续版本。§4 裁决记录保留。
 
 ## 3. 验收准则
 
