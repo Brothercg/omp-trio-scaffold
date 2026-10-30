@@ -60,6 +60,14 @@ const GOOD = `# 登录改造 · 验收报告
 | AC-2 | src/login.py:42 | 半通过 | 期望 200；实际 500；复现 pytest tests/test_login.py::test_ok |
 | AC-3 | tests/test_net.py | SKIP | 跳过原因 缺外部网络；解除条件 提供 mock server |
 
+## AC → 用例覆盖矩阵
+
+| AC | 用例编号 | 备注 |
+|---|---|---|
+| AC-1 | AC-1 | — |
+| AC-2 | AC-2 | — |
+| AC-3 | AC-3 | — |
+
 ## 汇总
 
 总判定：半通过。覆盖度：对照契约 3 条，通过 1、半通过 1、未通过 0、SKIP 1（SKIP 不计 PASS，单列计账）。
@@ -304,7 +312,8 @@ check("填充后的模板可通过校验", () => {
 		.replaceAll("<x.y.z>", "1.0.0")
 		.replaceAll("<hash>", "3b6f308")
 		.replaceAll("<YYYY-MM-DD HH:MM>", "2026-10-25 15:10")
-		.replaceAll("<N>", "1");
+		.replaceAll("<N>", "1")
+		.replaceAll("`<用例编号>`", "AC-1");
 	const violations = checkText("qa-20261025-1510-report-demo.md", filled);
 	assert.deepEqual(
 		violations.map((violation) => `${violation.rule}: ${violation.message}`),
@@ -351,6 +360,122 @@ check("半通过行不强制根因标签 → 无 T11", () => {
 	assert.equal(hit, undefined);
 });
 
+// ── 11.6 T12 覆盖矩阵（TASK-009 / spec §2.5、AC-11..AC-16）─────────────────
+
+console.log("\n[T12 覆盖矩阵]");
+
+const MATRIX = `## AC → 用例覆盖矩阵
+
+| AC | 用例编号 | 备注 |
+|---|---|---|
+| AC-1 | AC-1 | — |
+| AC-2 | AC-2 | — |
+| AC-3 | AC-3 | — |
+`;
+
+function matrixRules(text) {
+	return checkText(GOOD_NAME, text).filter((violation) => violation.rule === "T12");
+}
+
+function matrixMessages(text) {
+	return matrixRules(text).map((violation) => violation.message);
+}
+
+check("AC-15 完整矩阵 + 成对 SKIP → 零 T12", () => {
+	const text = GOOD.replace(MATRIX, "").replace(
+		"## 汇总",
+		`${MATRIX.replace("| AC-3 | AC-3 | — |", "| AC-3 | SKIP | 跳过原因 缺环境；解除条件 提供 mock |")}\n## 汇总`,
+	);
+	assert.deepEqual(matrixRules(text), []);
+});
+
+check("AC-11 缺矩阵段 → T12 覆盖矩阵段缺失", () => {
+	const text = GOOD.replace(/## AC → 用例覆盖矩阵[\s\S]*?(?=## 汇总)/u, "");
+	const messages = matrixMessages(text);
+	assert.ok(messages.some((m) => m.includes("覆盖矩阵段缺失")), messages.join("；"));
+});
+
+check("AC-12 悬空引用 → 引用用例不存在", () => {
+	const text = GOOD.replace("| AC-2 | AC-2 | — |", "| AC-2 | CASE-404 | — |");
+	assert.ok(matrixMessages(text).some((m) => m.includes("引用用例不存在：CASE-404")));
+});
+
+check("AC-12 空用例单元格 → AC 行缺用例编号或 SKIP", () => {
+	const text = GOOD.replace("| AC-1 | AC-1 | — |", "| AC-1 |  | — |");
+	assert.ok(matrixMessages(text).some((m) => m.includes("AC 行缺用例编号或 SKIP")));
+});
+
+check("AC-13 SKIP 缺挂起 → SKIP 行缺：解除条件/挂起登记", () => {
+	const text = GOOD.replace("| AC-3 | AC-3 | — |", "| AC-3 | SKIP | 跳过原因 缺环境 |");
+	const messages = matrixMessages(text);
+	assert.ok(messages.some((m) => m.includes("SKIP 行缺：") && m.includes("解除条件/挂起登记")), messages.join("；"));
+});
+
+check("AC-13 SKIP 原因+挂起齐全 → 零 T12", () => {
+	const text = GOOD.replace(
+		"| AC-3 | AC-3 | — |",
+		"| AC-3 | SKIP | 理由 缺环境；挂起登记 下游 19 条 |",
+	);
+	assert.deepEqual(matrixRules(text), []);
+});
+
+check("AC-14 小写 AC 编号 → AC 编号非法", () => {
+	const text = GOOD.replace("| AC-1 | AC-1 | — |", "| ac-1 | AC-1 | — |");
+	assert.ok(matrixMessages(text).some((m) => m.includes("AC 编号非法：ac-1")));
+});
+
+check("AC-14 中文编号 → AC 编号非法", () => {
+	const text = GOOD.replace("| AC-1 | AC-1 | — |", "| 用例1 | AC-1 | — |");
+	assert.ok(matrixMessages(text).some((m) => m.includes("AC 编号非法：用例1")));
+});
+
+check("AC-14 AC 编号重复 → 显示首次行号", () => {
+	const text = GOOD.replace("| AC-2 | AC-2 | — |", "| AC-1 | AC-2 | — |");
+	const messages = matrixMessages(text);
+	assert.ok(messages.some((m) => /AC 编号重复：AC-1（首次出现于第 \d+ 行）/u.test(m)), messages.join("；"));
+});
+
+check("AC-14 空矩阵（仅表头+分隔）→ 无 AC 数据行", () => {
+	const text = GOOD.replace(/\| AC-1 \| AC-1 \| — \|\n\| AC-2 \| AC-2 \| — \|\n\| AC-3 \| AC-3 \| — \|\n/u, "");
+	assert.ok(matrixMessages(text).some((m) => m.includes("覆盖矩阵无 AC 数据行")));
+});
+
+check("AC-16 违例行格式 <basename>:<line> [T12] <msg>", () => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "trio-t12-"));
+	const file = path.join(dir, GOOD_NAME);
+	fs.writeFileSync(file, GOOD.replace(/## AC → 用例覆盖矩阵[\s\S]*?(?=## 汇总)/u, ""));
+	const logs = [];
+	const original = console.log;
+	console.log = (...args) => logs.push(args.join(" "));
+	let rc;
+	try {
+		rc = main(["--", file]);
+	} finally {
+		console.log = original;
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+	assert.equal(rc, 1);
+	assert.match(
+		logs.join("\n"),
+		/qa-20261025-1510-report-登录改造\.md:\d+ \[T12\] 覆盖矩阵段缺失/u,
+	);
+});
+
+check("T12：表头缺「用例编号」列 → 表头违例", () => {
+	const text = GOOD.replace("| AC | 用例编号 | 备注 |", "| AC | 用例 | 备注 |");
+	assert.ok(matrixMessages(text).some((m) => m.includes("覆盖矩阵表头须含「AC」「用例编号」两列")));
+});
+
+check("T12：结论列存在但空 → 结论值域非法", () => {
+	const text = GOOD.replace(
+		"| AC | 用例编号 | 备注 |\n|---|---|---|",
+		"| AC | 用例编号 | 结论 | 备注 |\n|---|---|---|---|",
+	).replace("| AC-1 | AC-1 | — |", "| AC-1 | AC-1 |  | — |")
+		.replace("| AC-2 | AC-2 | — |", "| AC-2 | AC-2 | 通过 | — |")
+		.replace("| AC-3 | AC-3 | — |", "| AC-3 | AC-3 | 通过 | — |");
+	assert.ok(matrixMessages(text).some((m) => m.includes("结论值域非法：(空)")));
+});
+
 // ── 12. T10 路径存在性（TASK-003 / spec §1.5、AC-5/6/7）────────────────────
 
 console.log("\n[T10 路径存在性]");
@@ -373,6 +498,12 @@ ${body}
 | 用例 | 位置 | 结论 | 说明 |
 |---|---|---|---|
 | AC-1 | — | 通过 | — |
+
+## AC → 用例覆盖矩阵
+
+| AC | 用例编号 | 备注 |
+|---|---|---|
+| AC-1 | AC-1 | — |
 
 ## 汇总
 

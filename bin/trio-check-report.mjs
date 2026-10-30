@@ -482,6 +482,180 @@ export function checkT10(lines, root, ViolationCtor = Violation) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// T12 · AC → 用例覆盖矩阵
+// ─────────────────────────────────────────────────────────────────────────────
+
+const MATRIX_HEADING = /^#{1,6}\s*AC\s*(?:→|->)\s*用例覆盖矩阵\s*$/u;
+const MATRIX_AC = /^AC-[0-9A-Za-z._-]+$/u;
+const MATRIX_SKIP = /^SKIP(?:\b|[：:（(])/u;
+const MATRIX_REF_SEP = /[,，、;；\/\s]+/u;
+
+function headingIndex(line) {
+	return /^#{1,6}\s/u.test(line.trim());
+}
+
+/**
+ * 校验「AC → 用例覆盖矩阵」段（spec §2.5 M1–M10）。
+ * rows 为结果表数据行（{ line, cells: [用例, 位置, 结论, 说明] }）。
+ */
+export function checkMatrix(lines, rows) {
+	const out = [];
+	const headings = [];
+	lines.forEach((line, index) => {
+		if (MATRIX_HEADING.test(line.trim())) headings.push(index);
+	});
+
+	if (headings.length === 0) {
+		out.push(
+			new Violation(
+				1,
+				"T12",
+				"覆盖矩阵段缺失（须含标题「AC → 用例覆盖矩阵」）",
+			),
+		);
+		return out;
+	}
+
+	if (headings.length > 1) {
+		for (const index of headings.slice(1)) {
+			out.push(
+				new Violation(index + 1, "T12", `覆盖矩阵段重复 ${headings.length} 次`),
+			);
+		}
+	}
+
+	const knownCases = new Set(rows.map((row) => row.cells[0]));
+
+	for (const heading of headings) {
+		let end = lines.length;
+		for (let index = heading + 1; index < lines.length; index += 1) {
+			if (headingIndex(lines[index])) {
+				end = index;
+				break;
+			}
+		}
+		const body = lines.slice(heading + 1, end);
+
+		const tableStart = body.findIndex((line) => isTableRow(line));
+		if (tableStart < 0) {
+			out.push(new Violation(heading + 1, "T12", "覆盖矩阵段内无表格"));
+			continue;
+		}
+		const headerIndex = heading + 1 + tableStart;
+		const header = cells(lines[headerIndex]);
+		const acCol = header.indexOf("AC");
+		const caseCol = header.indexOf("用例编号");
+		const noteCol = header.indexOf("备注");
+		const verdictCol = header.indexOf("结论");
+
+		const separatorIndex = headerIndex + 1;
+		const separator = lines[separatorIndex];
+		if (
+			separator === undefined ||
+			!isTableRow(separator) ||
+			!cells(separator).every((cell) => SEPARATOR_CELL.test(cell))
+		) {
+			out.push(new Violation(separatorIndex + 1, "T12", "覆盖矩阵缺分隔行"));
+			continue;
+		}
+
+		if (acCol < 0 || caseCol < 0) {
+			out.push(
+				new Violation(
+					headerIndex + 1,
+					"T12",
+					`覆盖矩阵表头须含「AC」「用例编号」两列（现为：${header.join(" | ")}）`,
+				),
+			);
+			continue;
+		}
+
+		const dataRows = [];
+		let index = separatorIndex + 1;
+		while (index < lines.length && isTableRow(lines[index])) {
+			dataRows.push({ line: index + 1, cells: cells(lines[index]) });
+			index += 1;
+		}
+
+		if (dataRows.length === 0) {
+			out.push(new Violation(separatorIndex + 1, "T12", "覆盖矩阵无 AC 数据行"));
+			continue;
+		}
+
+		const seen = new Map();
+		for (const data of dataRows) {
+			const ac = (data.cells[acCol] ?? "").trim();
+			const caseCell = (data.cells[caseCol] ?? "").trim();
+			const note = (data.cells[noteCol] ?? "").trim();
+			const verdict = (data.cells[verdictCol] ?? "").trim();
+			const isSkip = MATRIX_SKIP.test(caseCell);
+
+			if (!MATRIX_AC.test(ac)) {
+				out.push(new Violation(data.line, "T12", `AC 编号非法：${ac || "(空)"}`));
+			} else if (seen.has(ac)) {
+				out.push(
+					new Violation(
+						data.line,
+						"T12",
+						`AC 编号重复：${ac}（首次出现于第 ${seen.get(ac)} 行）`,
+					),
+				);
+			} else {
+				seen.set(ac, data.line);
+			}
+
+			if (caseCell === "") {
+				out.push(new Violation(data.line, "T12", "AC 行缺用例编号或 SKIP"));
+			} else if (isSkip) {
+				const missing = [];
+				if (!["理由", "跳过原因", "原因"].some((token) => note.includes(token))) {
+					missing.push("理由/跳过原因/原因");
+				}
+				if (!["解除条件", "挂起登记"].some((token) => note.includes(token))) {
+					missing.push("解除条件/挂起登记");
+				}
+				if (missing.length > 0) {
+					out.push(new Violation(data.line, "T12", `SKIP 行缺：${missing.join("、")}`));
+				}
+				if (verdictCol >= 0 && verdict !== "" && verdict !== "SKIP") {
+					out.push(
+						new Violation(
+							data.line,
+							"T12",
+							`结论值域非法：${verdict || "(空)"}`,
+						),
+					);
+				}
+			} else {
+				for (const token of caseCell.split(MATRIX_REF_SEP)) {
+					if (token === "") continue;
+					if (!knownCases.has(token)) {
+						out.push(
+							new Violation(
+								data.line,
+								"T12",
+								`引用用例不存在：${token}（结果表无此用例编号）`,
+							),
+						);
+					}
+				}
+				if (verdictCol >= 0 && !VERDICTS.includes(verdict)) {
+					out.push(
+						new Violation(
+							data.line,
+							"T12",
+							`结论值域非法：${verdict || "(空)"}`,
+						),
+					);
+				}
+			}
+		}
+	}
+
+	return out;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 汇总入口
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -493,6 +667,7 @@ export function checkText(filePath, text, root = process.cwd()) {
 	if (table.violations.length === 0) {
 		violations.push(...checkHeader(lines, table.headerIndex, filePath));
 		violations.push(...checkRows(table.rows));
+		violations.push(...checkMatrix(lines, table.rows));
 		violations.push(...checkSummary(lines, table.rows));
 	}
 	violations.push(...table.violations);

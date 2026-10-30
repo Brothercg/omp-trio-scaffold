@@ -445,15 +445,17 @@ check("AC-5b 三份简报含五行自查清单与 REPLY-CONVENTIONS 指针", () 
 	}
 });
 
-check("AC-5c 升级覆盖：注入件改旧后重跑 init 恢复源内容", () => {
+check("AC-5c 升级覆盖：执行件改旧后重跑 init 恢复源内容", () => {
 	const dir = initTarget();
 	try {
 		runInit(dir);
-		const dest = path.join(dir, INJECTED);
+		// TASK-009 AC-6：REPLY-CONVENTIONS 属「下游领先」默认保留；
+		// 升级覆盖语义由执行件（模板）承载。
+		const dest = path.join(dir, ".omp", "trio", "templates", "report.template.md");
 		fs.writeFileSync(dest, "stale content\n");
 		const out = runInit(dir);
-		assert.match(out, /覆盖  docs\/REPLY-CONVENTIONS\.md/u);
-		execFileSync("cmp", [CONVENTIONS, dest]);
+		assert.match(out, /覆盖  \.omp\/trio\/templates\/report\.template\.md/u);
+		execFileSync("cmp", [path.join(ROOT, "templates", "report.template.md"), dest]);
 	} finally {
 		fs.rmSync(dir, { recursive: true, force: true });
 	}
@@ -478,23 +480,24 @@ check("AC-5d 幂等：内容未变化时重跑 init 输出已是最新且不重�
 
 check("AC-2f 只读目标 → rc=1、失败汇总含路径、后续注入继续", () => {
 	const dir = initTarget();
-	const docs = path.join(dir, "docs");
-	const dest = path.join(dir, INJECTED);
+	const templates = path.join(dir, ".omp", "trio", "templates");
+	const rel = ".omp/trio/templates/report.template.md";
+	const dest = path.join(dir, rel);
 	try {
 		runInit(dir);
 		fs.writeFileSync(dest, "stale\n");
 		fs.chmodSync(dest, 0o444);
-		fs.chmodSync(docs, 0o555);
+		fs.chmodSync(templates, 0o555);
 		const r = spawnSync("bash", [INIT_AGENT, dir], { encoding: "utf8" });
 		const out = `${r.stdout}${r.stderr}`;
 		assert.equal(r.status, 1, "只读目标应 exit 1");
-		assert.match(out, /失败  docs\/REPLY-CONVENTIONS\.md：/u);
+		assert.match(out, /失败  \.omp\/trio\/templates\/report\.template\.md：/u);
 		assert.match(out, /失败 1 件/u);
-		assert.match(out, /失败清单：\n  - docs\/REPLY-CONVENTIONS\.md/u);
-		assert.ok(!out.includes("覆盖  docs/REPLY-CONVENTIONS.md"), "失败不得打印「覆盖」");
+		assert.match(out, /失败清单：\n  - \.omp\/trio\/templates\/report\.template\.md/u);
+		assert.ok(!out.includes("覆盖  .omp/trio/templates/report.template.md"), "失败不得打印「覆盖」");
 		assert.match(out, /\[4\/6\]/u, "单件失败后应继续后续注入");
 	} finally {
-		fs.chmodSync(docs, 0o755);
+		fs.chmodSync(templates, 0o755);
 		if (fs.existsSync(dest)) fs.chmodSync(dest, 0o644);
 		fs.rmSync(dir, { recursive: true, force: true });
 	}
