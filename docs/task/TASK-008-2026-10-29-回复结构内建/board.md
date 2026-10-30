@@ -8,7 +8,7 @@
 | 任务目录 | `docs/task/TASK-008-2026-10-29-回复结构内建/` |
 | 起始日期 | `2026-10-29` |
 | 来源 | 下游「忘记输出结构」根因：简报指针悬空（init 不注入 `docs/REPLY-CONVENTIONS.md`）；用户拍板方案 A+B 精简版 |
-| qa_report | `docs/task/TASK-008-2026-10-29-回复结构内建/qa-20261030-1442-report-发布前置复跑-第3轮.md`（发布前置②基线抬升轮,65f2571;第 2 轮 1843 为其前置轮） |
+| qa_report | `docs/task/TASK-008-2026-10-29-回复结构内建/qa-20261030-1442-report-发布前置复跑-第3轮.md` |
 | release_gate | `strict` |
 
 ## 2. 状态
