@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# trio-install.sh —— 把脚手架的三个入口发布到本机 PATH 目录
+# trio-install.sh —— 把脚手架的四个入口发布到本机 PATH 目录
 #
 # 发布的是软链（symlink），不是副本：
 #   trio-init       -> <scaffold>/bin/init-agent.sh
@@ -95,9 +95,16 @@ for required in \
 	"bin/start-agent.sh" \
 	"bin/trio-selftest.sh" \
 	"bin/trio-tmux.sh" \
+	"bin/trio-align.sh" \
+	"bin/trio-mutation-check.mjs" \
 	"bin/trio-check-report.mjs" \
 	"bin/trio-policy-eval.mjs" \
 	"templates/pre-commit" \
+	"templates/post-commit" \
+	"templates/report.template.md" \
+	"profiles/arch.rules.md" \
+	"profiles/dev.rules.md" \
+	"profiles/test.rules.md" \
 	".omp/trio/policy.txt" \
 	".omp/hooks/pre/trio-guard.ts" \
 	".omp/extensions/trio-session-name.ts"; do
