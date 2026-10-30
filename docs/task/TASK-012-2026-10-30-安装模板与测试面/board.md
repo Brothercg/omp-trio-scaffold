@@ -10,17 +10,19 @@
 | 起始日期 | `2026-10-30` |
 | qa_report | `docs/task/TASK-012-2026-10-30-安装模板与测试面/qa-20261030-2258-report-安装模板与测试面.md` |
 | release_gate | `strict` |
+| 远端 main hash | `c0f4e440504b5dc8e86b5c6b9a1b3185a183c474` |
+| 远端 tag object | `b5ef707bdb0e4e11e00133dc5f04ed8472a9dd99`（peeled `12df23eb99fe4cd1258fbc4c6caeb667d38a3681`） |
 
 ## 2. 状态
 
 | 字段 | 值 |
 |---|---|
 | 当前状态 | `user_signed` |
-| 最后推进人 | `用户` |
-| 最后更新 | `2026-10-30 23:05` |
+| 最后推进人 | `DEV`（发布 v0.9.3） |
+| 最后更新 | `2026-10-30 23:24` |
 
 > 终验依据：用户终验签字 2026-10-30 23:05；QA 第 1 轮全绿 + SKIP 挂起已现记。
-> TASK-012 真闭环，唯一遗留动作 = v0.9.3 发布，下游 AC-10 随发布反触发。
+> v0.9.3 已发布（release commit `12df23e`，tag object `b5ef707`，main `c0f4e44`）；下游 AC-10 待复跑。
 
 ### 处置流程
 
@@ -105,7 +107,21 @@ selftest 28 项、tooling 安装面 6 套件全绿。交 QA 按 `arch-20261030-2
 |---|---|---|---|
 | 下游 `--force` 重装 + selftest 全绿（AC-10） | v0.9.3 修复落地 | 用户/下游 | 复跑 `init-agent.sh . --force` + `trio-selftest.sh --fast`，回填本板 |
 | 下游 19 条「上游 ⑩ 依赖」SKIP 中模板/测试面项 | 同上 | 下游 QA | 转实跑并回填下游板 §7 |
-| v0.9.3 发布（tag/push） | QA 全绿 + user_signed | DEV 窗口 | 按发布规则执行 |
+| ~~v0.9.3 发布（tag/push）~~ | — | 已完成（release commit `12df23e`；tag `b5ef707`；main `c0f4e44`） | — |
 | TASK-013 提案（policy glob 布局化） | 用户批准立项 | ARCH | 补写权面契约（spec §8 遗留） |
 
 `user_signed` + 挂起清单清零 = 真闭环；解除条件成熟 → 触发者集中补测一轮。
+
+## 8. 发布记录
+
+- `2026-10-30 23:24`：DEV 发布 `v0.9.3` —— `main 8a93c8e..c0f4e44`；
+  release commit `12df23e`；tag `v0.9.3` object `b5ef707`
+  （peeled `12df23e`）；远端 main / tag 已落地。
+- 发布前核验：全量 450 项 0 失败；`trio-selftest.sh --fast` 28 项 0 失败；
+  QA 报告校验 exit 0；`bash -n` exit 0。
+- pre-push：TASK-012 `strict` path A 通过；基线 `e00bdcd` ≠ 待推 `c0f4e44`，
+  delta 仅文档（4 个）→ 放行；审计无 bypass。
+- 发布记录：`dev-20261030-2311-release-v0.9.3.md`。
+- 备注：`de4a476` / `c0f4e44` 为发布门禁字段归一（`qa_report` 纯路径、
+  `当前状态` 纯 `user_signed`），修复 pre-push path A 误判；tag 仍指向 release commit。
+- 遗留：AC-10 下游 `factor_synthesis` 重装 + 19 条 SKIP 转实跑，待下游窗口回填。
