@@ -6,6 +6,34 @@
 格式：每版本一节，条目按「新增 / 修改 / 修复 / 弃用」分组，注明关联任务或 ADR。
 -->
 
+## v0.9.0 — 2026-10-30
+
+TASK-009：安装布局无关化（⑩）与报告矩阵机检 T12（⑪）。
+
+### 新增
+- `bin/init-agent.sh` 支持 `--dry-run`（零写入预览：`将创建`/`将覆盖`/`将跳过`/`将保留`
+  四类计划行 + `干跑：…（零写入）` 汇总）与 `--layout auto|bin|tooling`
+  （auto 按目标 `tooling/bin` 存在性判定；非法/缺值 exit 2）。
+- tooling 布局落点：`tooling/bin/`（校验器、策略判定器、自检脚本）、`tooling/tests/`、
+  `tooling/hooks/`（模板源副本）；`.git/hooks/*` 产物对模板做一次
+  `bin/trio-` → `tooling/bin/trio-` 替换，`trio-policy-eval.mjs` 的 guard 导入
+  同步适配 `../../.omp`。新增下发件 `bin/trio-selftest.sh`（两布局均 755）。
+- `bin/trio-check-report.mjs` 新增 T12（M1–M10）：覆盖矩阵段存在/唯一、表头两列、
+  AC 编号合法且不重复、用例引用可解析、SKIP 行「理由+挂起」成对、空矩阵拒绝。
+
+### 修改
+- 下游领先集合 `AHEAD = {docs/REPLY-CONVENTIONS.md, .omp/trio/templates/board.template.md}`
+  默认保留（计入跳过），`--force` 才覆盖；`policy.txt` 仍不受 `--force` 影响。
+- `bin/trio-align.sh` / `bin/trio-selftest.sh` 按 `.omp/trio/policy.txt` 向上两级自定位
+  仓库根（bin / tooling 两种安装位置）；selftest 套件发现与校验器路径同时兼容
+  `tests/` 与 `tooling/tests/`，`trio-install.sh` 缺席时探针计 SKIP。
+- 测试：新增 `tests/trio-init-layout.test.mjs`（15 项）；`trio-check-report` 增至 67 项
+  （T12 正例 1 + 反例 13）；pre-push / reply-conventions 夹具补矩阵段并适配领先保留语义。
+
+### 下游同步
+重装工装面（`trio-init` 或 `init-agent.sh --layout auto`）后，下游 19 条
+「上游 ⑩ 依赖」SKIP 可转实跑，`C-13`（AC 覆盖无机器约束）可关行。
+
 ## v0.8.0 — 2026-10-30
 
 粘贴件 B ①-⑨ 工装源反馈修订（执行 = 人工逃生舱，工装账本独立立账）。
