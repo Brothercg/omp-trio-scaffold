@@ -5,7 +5,10 @@
 落位：docs/task/<YYYY-MM-DD-事项>/<你的角色>-<YYYYMMDD>-<HHMM>-bug-<编号>.md
 
 核心要求：
-  - 必须附最小报错复现脚本路径（`type: code` 时）；缺失则缺陷不成立。
+  - 复现脚本**归 QA 独占**（`type: code` 时）：脚本由 QA 落地，
+    其他角色只登记「待 QA 补复现脚本」，不得代写。
+  - **复现脚本缺失不得置 `confirmed`**（可停留 `open`）；脚本落地后方可推进。
+  - **置 `fixed` 须附 QA 验证凭据（双件指针）**：见文末状态流转注与 §7。
   - 只报告不修复 —— 任何角色都不改别人的代码。
   - 契约缺口（`type: contract-gap`）另由 ARCH 出 `arch-*-verdict-*.md`，
     本文件只留现象与指向，**不要**在这里写裁决。
@@ -22,6 +25,15 @@
 | 状态 | `open` / `confirmed` / `fixed` / `rejected` |
 | 裁决记录 | `arch-<YYYYMMDD>-<HHMM>-verdict-<N>.md`（无则填 `无`） |
 
+<!--
+状态流转注（流转门槛，逐条可判定）：
+  open → confirmed    前置：复现脚本已落地（QA 独占）。**脚本缺失不得置 confirmed**。
+  confirmed → fixed   前置：附 **QA 验证凭据（双件指针）**——
+                      配对验收双件 `qa-*-checklist-*.md` + `qa-*-report-*.md`（同 <YYYYMMDD>-<HHMM>）。
+                      无双件指针不得置 fixed。
+  任意 → rejected     需写明理由（误解 / 非缺陷 / 复现不成立）。
+-->
+
 ## 1. 缺陷现象
 
 <实际观察到的行为。与期望行为的差异要具体到可复现。>
@@ -34,7 +46,9 @@
 
 ## 2. Failing Test Script
 
-> 最小报错复现脚本路径 —— 本缺陷的必备项，缺失则缺陷不成立。
+> 最小报错复现脚本路径 —— **复现脚本归 QA 独占**（`tests/repro/` 由 QA 落地，
+> 其他角色只登记「待 QA 补复现脚本」）。缺失则本缺陷**不得置 `confirmed`**
+> （可停留 `open`），脚本落地后方可推进。
 
 ```
 tests/repro/<defect-id>.py
@@ -89,3 +103,4 @@ $ pytest tests/test_<defect-id>.py -v
 | 处置 | `确认为实现缺陷` / `已转 ARCH 裁决` / `非缺陷（误解）` |
 | 裁决文件 | `arch-<YYYYMMDD>-<HHMM>-verdict-<N>.md`（无则填 `无`） |
 | 关联交付 | `dev-*-release.md`（无则填 `无`） |
+| QA 验证凭据 | 配对双件 `qa-<YYYYMMDD>-<HHMM>-checklist-*.md` + `qa-<YYYYMMDD>-<HHMM>-report-*.md`（置 `fixed` 必填；未闭环填 `无`） |
