@@ -26,6 +26,7 @@ const { default: registerGuard } = await import(pathToFileURL(GUARD).href);
 const PRECOMMIT = payload("tooling/hooks/pre-commit", "templates/pre-commit", ".git/hooks/pre-commit");
 assert.ok(PRECOMMIT, "未找到 pre-commit");
 const POLICY = fs.readFileSync(path.join(ROOT, ".omp", "trio", "policy.txt"), "utf8");
+const BIN_REL = fs.existsSync(path.join(ROOT, "tooling", "bin")) ? "tooling/bin" : "bin";
 
 // 夹具内同时放 bin/ 与 tooling/bin/ 判定器，兼容源模板与渲染后 hook。
 function installTools(repo) {
@@ -272,8 +273,8 @@ for (const target of [
 	".omp/trio/policy.txt",
 	".git/hooks/pre-commit",
 	".omp/hooks/pre/trio-guard.ts",
-	"bin/trio-selftest.sh",
-	"bin/init-agent.sh",
+	`${BIN_REL}/trio-selftest.sh`,
+	`${BIN_REL}/init-agent.sh`,
 	"templates/pre-push",
 	"templates/pre-commit",
 ]) {
@@ -326,17 +327,17 @@ if (WINDOW_ACTIVE) {
 		"deny * .omp/hooks/** 未恢复",
 	);
 	assert.ok(
-		/^deny\s+\*\s+bin\/\*\*$/m.test(policyText),
-		"deny * bin/** 未恢复",
+		/^deny\s+\*\s+(?:tooling\/)?bin\/\*\*$/m.test(policyText),
+		"deny * (tooling/)bin/** 未恢复",
 	);
-	console.log("  ✓ 回收核验：BEGIN/END TASK-00[23] 清零 + deny * .omp/hooks/** 与 deny * bin/** 恢复");
+	console.log(`  ✓ 回收核验：BEGIN/END TASK-00[23] 清零 + deny * .omp/hooks/** 与 deny * ${BIN_REL}/** 恢复`);
 }
 
 // fail-closed —— 通道是精确文件放行，不是目录开洞；回收后通道位置回到 deny 全覆盖。
 await expectBlock("[dev] .omp/hooks/ 其他文件拒绝（fail-closed）", "dev", "write",
 	{ path: ".omp/hooks/pre/other.ts", content: "x" });
-await expectBlock("[dev] bin/ 其他文件拒绝（fail-closed）", "dev", "write",
-	{ path: "bin/other.sh", content: "x" });
+await expectBlock(`[dev] ${BIN_REL}/ 其他文件拒绝（fail-closed）`, "dev", "write",
+	{ path: `${BIN_REL}/other.sh`, content: "x" });
 await expectBlock("[dev] templates/ 其他文件拒绝（fail-closed）", "dev", "write",
 	{ path: "templates/pre-commit", content: "x" });
 

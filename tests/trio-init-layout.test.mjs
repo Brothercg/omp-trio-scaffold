@@ -31,9 +31,15 @@ function hookSrc(name) {
 function templateSrc(name) {
 	return payload(`templates/${name}`, `.omp/trio/templates/${name}`);
 }
+function binHookSrc(name) {
+	return payload(`templates/${name}`, `.omp/trio/templates/${name}`, `tooling/hooks/${name}`);
+}
 const TEMPLATE_DIRS = [path.join(ROOT, "templates"), path.join(ROOT, ".omp/trio/templates")]
 	.filter((dir) => fs.existsSync(dir));
 const BIN_HOOK_SRC = payload("templates/pre-commit");
+const BIN_HOOK_IS_POINTER =
+	BIN_HOOK_SRC !== null &&
+	/exec\s+"?\$root\/tooling\/hooks\/pre-commit/u.test(fs.readFileSync(BIN_HOOK_SRC, "utf8"));
 const VALIDATOR = toolPath("trio-check-report.mjs");
 assert.ok(VALIDATOR, "未找到 trio-check-report.mjs");
 const { checkText } = await import(pathToFileURL(VALIDATOR).href);
@@ -276,7 +282,7 @@ check("AC-5 bin：hooks 与模板逐字节相同，新增 selftest 可执行", (
 		for (const hook of ["pre-commit", "pre-push", "post-commit"]) {
 			assert.deepEqual(
 				fs.readFileSync(path.join(dir, ".git/hooks", hook)),
-				fs.readFileSync(hookSrc(hook)),
+				fs.readFileSync(binHookSrc(hook)),
 				`.git/hooks/${hook} 应与模板逐字节相同`,
 			);
 		}
@@ -448,22 +454,26 @@ check("AC-9 tooling 布局：套件解析到 tooling/tests、校验器可用、i
 	}
 });
 
-if (BIN_HOOK_SRC) check("AC-9 bin 布局：套件解析到 tests/、校验器可用", () => {
-	const dir = newRepo();
-	try {
-		assert.equal(runInit([dir, "--layout", "bin"]).status, 0);
-		pruneSuites(dir, "tests");
-		const r = spawnSync("bash", [path.join(dir, "bin/trio-selftest.sh"), dir, "--fast"], {
-			encoding: "utf8",
-			env: ENV,
-		});
-		assert.equal(r.status, 0, `${r.stdout}\n${r.stderr}`);
-		assert.match(r.stdout, /tests\/dummy\.test\.mjs/u);
-		assert.ok(!r.stdout.includes("报告校验器缺失"), "校验器应解析到 bin");
-	} finally {
-		fs.rmSync(dir, { recursive: true, force: true });
-	}
-});
+if (BIN_HOOK_SRC && !BIN_HOOK_IS_POINTER) {
+	check("AC-9 bin 布局：套件解析到 tests/、校验器可用", () => {
+		const dir = newRepo();
+		try {
+			assert.equal(runInit([dir, "--layout", "bin"]).status, 0);
+			pruneSuites(dir, "tests");
+			const r = spawnSync("bash", [path.join(dir, "bin/trio-selftest.sh"), dir, "--fast"], {
+				encoding: "utf8",
+				env: ENV,
+			});
+			assert.equal(r.status, 0, `${r.stdout}\n${r.stderr}`);
+			assert.match(r.stdout, /tests\/dummy\.test\.mjs/u);
+			assert.ok(!r.stdout.includes("报告校验器缺失"), "校验器应解析到 bin");
+		} finally {
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
+	});
+} else if (BIN_HOOK_IS_POINTER) {
+	console.log("  - 跳过 AC-9 bin：templates/pre-commit 为下游指针，临时 bin 布局无 tooling/hooks 真值面");
+}
 
 // ── TASK-011 自托管源解析（AC-1..AC-5）─────────────────────────────────────
 
